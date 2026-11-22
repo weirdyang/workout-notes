@@ -1,0 +1,10 @@
+// Cloudflare Workers static assets: serves the built app in dist/. No Worker script needed.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "workout-notes",
+  "compatibility_date": "2026-11-22",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}

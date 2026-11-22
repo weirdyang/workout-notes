@@ -47,6 +47,18 @@ Targets .NET 10. The app needs Node.js; Fable compiles the F# to JavaScript.
 - Badges: `R+` rep high, `L+` load high, `=` ties your best. Marks are defined in Legend.
 - Copy puts the note on the clipboard (for pasting into a chat). Notes stay on the device; export from Legend.
 
+## Hosting
+
+Every push to `main` runs `.github/workflows/deploy.yml`: tests, builds the app, and deploys `dist/` to Cloudflare Workers
+static assets (`wrangler.jsonc`), at `https://workout-notes.<your-subdomain>.workers.dev`.
+
+Deploy needs two repository secrets (Settings → Secrets and variables → Actions):
+
+- `CLOUDFLARE_API_TOKEN` — a token made from the "Edit Cloudflare Workers" template
+- `CLOUDFLARE_ACCOUNT_ID` — from the Cloudflare dashboard
+
+Without them the workflow still tests and builds, and skips the deploy.
+
 ## Scripts
 
 Double-click from Explorer. Each writes its output to `scripts/logs/<name>.log`.
