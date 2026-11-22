@@ -138,3 +138,7 @@ textarea.editor { flex: 1; min-height: 160px; width: 100%; resize: none; border:
 .field-problem { color: var(--danger); font-size: 14px; margin: 10px 0 0; }
 .sheet-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 22px; padding-top: 14px; border-top: 1px solid #23262b; }
 .usage { font-size: 13px; color: var(--muted); }
+@media (max-width: 480px) {
+  .help-row { grid-template-columns: 1fr; gap: 2px; padding: 8px 0; }
+  .help-row code { white-space: normal; }
+}
