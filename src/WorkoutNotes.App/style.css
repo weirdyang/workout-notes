@@ -43,8 +43,8 @@ button { font: inherit; color: inherit; }
 .empty { color: var(--muted); padding: 40px 24px; text-align: center; line-height: 1.6; }
 .fab { position: fixed; right: max(20px, calc(50vw - 340px)); bottom: calc(24px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border-radius: 28px; border: 0; background: var(--accent); color: var(--bg); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
 
-.badge { font: 700 11px var(--sans); padding: 3px 6px; border-radius: 6px; background: var(--accent); color: var(--bg); white-space: nowrap; }
-.badge.tie { background: var(--key); color: #c9ccd1; }
+.badge { font: 700 12px var(--sans); padding: 3px 7px; border-radius: 6px; background: #000; color: var(--accent); border: 1px solid rgba(245, 165, 36, 0.55); white-space: nowrap; }
+.badge.tie { background: #000; color: #c9ccd1; border-color: #3a3d42; }
 
 .editor-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 textarea.editor { flex: 1; min-height: 160px; width: 100%; resize: none; border: 0; outline: none; background: var(--bg); color: var(--text);
@@ -108,3 +108,7 @@ textarea.editor { flex: 1; min-height: 160px; width: 100%; resize: none; border:
 .help-row span { color: #c9ccd1; }
 .help-row .badge { justify-self: start; }
 .help-note { font-size: 14px; color: #c9ccd1; line-height: 1.5; margin: 6px 0 0; }
+.help-row .badge { font-size: 15px; padding: 5px 12px; border-radius: 8px; }
+.help-row code { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.help-row span.badge { color: var(--accent); }
+.help-row span.badge.tie { color: #c9ccd1; }

@@ -1039,12 +1039,12 @@ let private helpView (model: Model) dispatch =
                         example "legs cooked" "a line without @ is just text"
                     ]
                     section "Weight" [
-                        example "85" "kg"
-                        example "85kg  40lb  2plates" "unit right after the number"
-                        example "+16" "added (weighted pull-up)"
-                        example "-18" "assisted (machine)"
-                        example "bw" "bodyweight"
-                        example "-" "no weight"
+                        example "incline @ 85x6" "85 kg (no unit means kg)"
+                        example "curl @ 40lbx10" "unit right after the number: kg, lb, plates…"
+                        example "pull-up @ +16x5" "+ added weight"
+                        example "dip @ -18x10" "- then a number: assisted"
+                        example "leg raise @ bw 20" "bw: bodyweight"
+                        example "plank @ - 60,60" "- on its own: no weight"
                     ]
                     section "Badges" [
                         Html.div [ prop.className "help-row"; prop.children [ badgeView (Some LoadHigh); Html.span "Heaviest ever for this exercise (same unit)" ] ]
