@@ -101,3 +101,17 @@ let ``note with header`` () =
 let ``header without title, and bad date`` () =
     Assert.Equal(Ok { Date = DateOnly(2026, 11, 22); Title = None }, parseHeader "2026-11-22")
     Assert.True(Result.isError (parseHeader "22 Nov 2026 · Run"))
+
+[<Theory>]
+[<InlineData("Incline 85 6,6,6", "[Incline] 85 6,6,6")>]
+[<InlineData("Low bar Smith 105 10", "[Low bar Smith] 105 10")>]
+[<InlineData("3STPBS 70 3,3,3", "[3STPBS] 70 3,3,3")>]
+[<InlineData("Pull-up +16 4,4,3#", "[Pull-up] +16 4,4,3#")>]
+[<InlineData("Hanging leg raise BW 20,20,20", "[Hanging leg raise] BW 20,20,20")>]
+[<InlineData("Incline 92.5 3 // moved smooth", "[Incline] 92.5 3 // moved smooth")>]
+[<InlineData("legs cooked by the end", "legs cooked by the end")>]
+[<InlineData("did 3 sets", "did 3 sets")>]
+[<InlineData("[Incline] 85 6", "[Incline] 85 6")>]
+[<InlineData("85 6,6,6", "85 6,6,6")>]
+let ``normalizeLine wraps the exercise name`` (input: string, expected: string) =
+    Assert.Equal(expected, normalizeLine input)

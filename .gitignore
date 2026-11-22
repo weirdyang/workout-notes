@@ -5,3 +5,6 @@ obj/
 *.user
 TestResults/
 scripts/logs/
+node_modules/
+dist/
+src/WorkoutNotes.App/fable_output/

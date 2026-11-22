@@ -1,9 +1,12 @@
 module WorkoutNotes.Core.Printer
 
-open System.Globalization
+/// Decimal without trailing zeros: 72.50 → "72.5", 100.0 → "100".
+let formatDecimal (d: decimal) =
+    let s = string d
 
-let private fmt (d: decimal<kg>) =
-    (decimal d).ToString("0.###", CultureInfo.InvariantCulture)
+    if s.Contains "." then s.TrimEnd('0').TrimEnd('.') else s
+
+let private fmt (d: decimal<kg>) = formatDecimal (decimal d)
 
 let printWeight =
     function
@@ -37,7 +40,10 @@ let printLine =
     | Unparsed(raw, _) -> raw
 
 let printHeader (h: Header) =
-    let date = h.Date.ToString("yyyy-MM-dd ddd", CultureInfo.InvariantCulture)
+    let days = [| "Sun"; "Mon"; "Tue"; "Wed"; "Thu"; "Fri"; "Sat" |]
+    let pad (n: int) w = (string n).PadLeft(w, '0')
+    let d = h.Date
+    let date = $"{pad d.Year 4}-{pad d.Month 2}-{pad d.Day 2} {days.[int d.DayOfWeek]}"
 
     match h.Title with
     | Some t -> $"{date} · {t}"

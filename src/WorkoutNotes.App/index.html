@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#0E0F11">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Workout Notes">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icon-180.png">
+  <link rel="stylesheet" href="./style.css">
+  <title>Workout Notes</title>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="./fable_output/Main.js"></script>
+  <script>
+    // iOS doesn't shrink the page when the keyboard opens: size the app to the visible area instead,
+    // so the key bar sits right above the keyboard.
+    if (window.visualViewport) {
+      const vv = window.visualViewport;
+      const fit = () => {
+        document.documentElement.style.setProperty("--vvh", vv.height + "px");
+        window.scrollTo(0, 0);
+      };
+      vv.addEventListener("resize", fit);
+      fit();
+    }
+    if ("serviceWorker" in navigator && location.hostname !== "localhost") {
+      window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js"));
+    }
+  </script>
+</body>
+</html>

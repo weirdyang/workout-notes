@@ -10,6 +10,7 @@
     <Compile Include="Parser.fs" />
     <Compile Include="Printer.fs" />
     <Compile Include="Scoring.fs" />
+    <Compile Include="History.fs" />
   </ItemGroup>
 
   <ItemGroup>

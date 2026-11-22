@@ -1,7 +1,6 @@
 module WorkoutNotes.Core.Parser
 
 open System
-open System.Globalization
 open XParsec
 open XParsec.Parsers
 open XParsec.CharParsers
@@ -39,9 +38,8 @@ let private decimalKg =
             | ValueSome f -> whole + "." + f
             | ValueNone -> whole
 
-        match Decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture) with
-        | true, d -> preturn (d * 1.0m<kg>)
-        | _ -> fail (Message "invalid weight")
+        if text.Length > 9 then fail (Message "weight too large")
+        else preturn (decimal text * 1.0m<kg>)
 
 let private weight =
     choice
@@ -54,9 +52,8 @@ let private weight =
 let private rep =
     digits .>>. opt (satisfy isMarkChar)
     >>= fun struct (n, mark) ->
-        match Int32.TryParse(n, NumberStyles.None, CultureInfo.InvariantCulture) with
-        | true, count -> preturn { Count = count; Mark = ValueOption.toOption mark }
-        | _ -> fail (Message "rep count too large")
+        if n.Length > 6 then fail (Message "rep count too large")
+        else preturn { Count = int n; Mark = ValueOption.toOption mark }
 
 let private reps =
     sepBy1 rep (ws0 >>. pchar ',' .>> ws0) |>> fun struct (items, _) -> List.ofSeq items
@@ -97,6 +94,25 @@ let parseLine (line: string) : Line =
     else
         Line.Text trimmed
 
+/// `yyyy-MM-dd` → DateOnly, without culture APIs (runs under Fable too).
+let tryParseIsoDate (s: string) : DateOnly option =
+    let isDigits (x: string) = x.Length > 0 && x |> Seq.forall Char.IsDigit
+
+    if s.Length = 10 && s.[4] = '-' && s.[7] = '-' then
+        let y, m, d = s.Substring(0, 4), s.Substring(5, 2), s.Substring(8, 2)
+
+        if isDigits y && isDigits m && isDigits d then
+            let y, m, d = int y, int m, int d
+
+            if m >= 1 && m <= 12 && d >= 1 && d <= DateTime.DaysInMonth(y, m) then
+                Some(DateOnly(y, m, d))
+            else
+                None
+        else
+            None
+    else
+        None
+
 /// Header line: `2026-11-21 Sat · Incline + legs`. Date is required; title follows `·`.
 let parseHeader (line: string) : Result<Header, string> =
     let t = line.Trim()
@@ -104,9 +120,9 @@ let parseHeader (line: string) : Result<Header, string> =
     if t.Length < 10 then
         Result.Error "header must start with a date (yyyy-MM-dd)"
     else
-        match DateOnly.TryParseExact(t.Substring(0, 10), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None) with
-        | false, _ -> Result.Error $"invalid date: {t.Substring(0, 10)}"
-        | true, date ->
+        match tryParseIsoDate (t.Substring(0, 10)) with
+        | None -> Result.Error $"invalid date: {t.Substring(0, 10)}"
+        | Some date ->
             let title =
                 match t.IndexOf '·' with
                 | -1 -> None
@@ -132,3 +148,28 @@ let parseNote (text: string) : Result<Note, string> =
                 |> List.map parseLine
                 // drop the blank line(s) directly under the header
                 |> List.skipWhile ((=) Blank) })
+
+/// Bracket-free entry: `Low bar Smith 105 10` → `[Low bar Smith] 105 10`.
+/// Picks the shortest leading name (must contain a letter) after which the rest parses as a full row.
+/// Lines that already start with `[`, blanks and free text that doesn't end in a row come back unchanged.
+let normalizeLine (line: string) : string =
+    let t = line.Trim()
+
+    if t = "" || t.StartsWith "[" || t.StartsWith "//" then
+        line
+    else
+        let words = t.Split([| ' '; '\t' |], StringSplitOptions.RemoveEmptyEntries)
+
+        seq { 1 .. words.Length - 1 }
+        |> Seq.tryPick (fun k ->
+            let name = String.Join(" ", words.[.. k - 1])
+            let rest = String.Join(" ", words.[k..])
+            let candidate = $"[{name}] {rest}"
+
+            if name |> Seq.exists Char.IsLetter then
+                match parseLine candidate with
+                | Exercise _ -> Some candidate
+                | _ -> None
+            else
+                None)
+        |> Option.defaultValue line

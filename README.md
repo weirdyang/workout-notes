@@ -23,15 +23,29 @@ Reps are comma-separated, each with an optional user-defined mark (`8*`, `8#`).
 | `src/WorkoutNotes.Core/Parser.fs` | XParsec row parser (pure F#, Fable-compatible), header and note parsing. Never throws |
 | `src/WorkoutNotes.Core/Printer.fs` | Back to text; `parseLine (printRow r) = Exercise r` |
 | `src/WorkoutNotes.Core/Scoring.fs` | Mark behaviours, Epley e1RM, undefined-mark check |
+| `src/WorkoutNotes.Core/History.fs` | Last session, best per weight, badges (rep high, load high, tie) |
+| `src/WorkoutNotes.App` | The web app: Fable + Elmish + Feliz, bundled by Vite, installable as a PWA |
 | `tests/WorkoutNotes.Core.Tests` | xUnit examples + FsCheck round-trip property |
 
 ## Run
 
 ```
-dotnet test
+dotnet test              # core library tests
+dotnet tool restore
+npm install
+npm run dev              # app with live reload on http://localhost:5173
+npm run build            # static site in dist/
 ```
 
-Targets .NET 10.
+Targets .NET 10. The app needs Node.js; Fable compiles the F# to JavaScript.
+
+## Using the app
+
+- One note per session; the first line is the date (`2026-11-22 Sun · Push`).
+- Type rows without brackets (`Incline 85 6,6,6`); Enter wraps the name: `[Incline] 85 6,6,6`.
+- Start typing a name to pick from your exercises; the bar shows last session's sets and fills the matching one.
+- Badges: `R+` rep high, `L+` load high, `=` ties your best. Marks are defined in Legend.
+- Copy puts the note on the clipboard (for pasting into a chat). Notes stay on the device; export from Legend.
 
 ## Scripts
 
@@ -43,3 +57,5 @@ Double-click from Explorer. Each writes its output to `scripts/logs/<name>.log`.
 | `scripts/build.cmd` | `dotnet build` |
 | `scripts/restore.cmd` | `dotnet restore` |
 | `scripts/clean.cmd` | `dotnet clean` |
+| `scripts/dev.cmd` | Run the app locally with live reload (needs Node.js) |
+| `scripts/publish.cmd` | Build the app into `dist/` |
