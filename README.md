@@ -50,11 +50,11 @@ Targets .NET 10. The app needs Node.js; Fable compiles the F# to JavaScript.
 ## Hosting
 
 Every push to `main` runs `.github/workflows/deploy.yml`: tests, builds the app, and deploys `dist/` to Cloudflare Workers
-static assets (`wrangler.jsonc`), at `https://workout-notes.<your-subdomain>.workers.dev`.
+static assets (`wrangler.jsonc`), at **https://log.wdym.fyi**.
 
 Deploy needs two repository secrets (Settings → Secrets and variables → Actions):
 
-- `CLOUDFLARE_API_TOKEN` — a token made from the "Edit Cloudflare Workers" template
+- `CLOUDFLARE_API_TOKEN` — account: Workers Admin (or Workers Scripts Write); zone `wdym.fyi`: Workers Routes Write
 - `CLOUDFLARE_ACCOUNT_ID` — from the Cloudflare dashboard
 
 Without them the workflow still tests and builds, and skips the deploy.
