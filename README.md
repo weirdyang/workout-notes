@@ -5,15 +5,20 @@ Apple Notes for workout logging: one plain-text note per session, one line per e
 ```
 2026-11-21 Sat · Incline + legs
 
-[Incline]        92.5   3
-[Incline]        85     6,6,6
-[Pull-up]        +16    4,4,3#
-[Hanging leg raise]  BW  20,20,20*
+incline @ 92.5x3
+incline @ 85x6,6,6
+pull-up @ +16x4,4,3#
+curl @ 40lbx10,10
+hanging leg raise @ bw 20,20,20*
 legs cooked by the end
 ```
 
-Row grammar: `[exercise] weight reps // note`. Weight is `72.5`, `+16` (added), `-18` (assisted), `BW`, or omitted.
-Reps are comma-separated, each with an optional user-defined mark (`8*`, `8#`).
+Row: `exercise @ weight x reps // note`. A line is a row only if it has `@`.
+
+- Weight: `85` (kg by default), `85kg`, `40lb`, `2plates` — unit letters right after the number; `+16` added, `-18` assisted, `bw` bodyweight, `-` none.
+- `x` or a space separates weight and reps; spaces are optional: `incline@85x3,3,3`.
+- Reps are comma-separated, each with an optional user-defined mark (`8*`, `8#`).
+- Weights only compare within the same unit. Old `[exercise] weight reps` lines are converted automatically.
 
 ## Layout
 
@@ -42,8 +47,10 @@ Targets .NET 10. The app needs Node.js; Fable compiles the F# to JavaScript.
 ## Using the app
 
 - One note per session; the first line is the date (`2026-11-22 Sun · Push`).
-- Type rows without brackets (`Incline 85 6,6,6`); Enter wraps the name: `[Incline] 85 6,6,6`.
-- Start typing a name to pick from your exercises; the bar shows last session's sets and fills the matching one.
+- Type `incline @ 85x6,6,6`. The key bar has `@`, `x`, `,`, your marks and `bw`, so after the name you stay on the number keyboard.
+- Start typing a name to pick from your exercises; the bar shows last session's sets and one tap fills the matching one.
+- A name you've never used is flagged as new, with the closest existing name offered ("did you mean incline?").
+- Rows are tidied when you leave the note (`incline@85kg x 3` → `incline @ 85x3`).
 - Badges: `R+` rep high, `L+` load high, `=` ties your best. Marks are defined in Legend.
 - Copy puts the note on the clipboard (for pasting into a chat). Notes stay on the device; export from Legend.
 

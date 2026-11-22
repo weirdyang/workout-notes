@@ -2,21 +2,19 @@ namespace WorkoutNotes.Core
 
 open System
 
-[<Measure>]
-type kg
-
-/// The weight column of a row. Each form only compares with its own form.
+/// The weight of a row. Numbers carry the unit as written ("kg", "lb", "plates"); kg is the default.
+/// Weights only compare with the same form and the same unit.
 type Weight =
-    | Load of decimal<kg>      // 72.5
-    | Added of decimal<kg>     // +16  (weighted pull-up, dip)
-    | Assisted of decimal<kg>  // -18  (assisted machine)
-    | Bodyweight               // BW
-    | Unweighted               // omitted (machines with no number, etc.)
+    | Load of value: decimal * unit: string      // 85, 85kg, 40lb, 2plates
+    | Added of value: decimal * unit: string     // +16   (weighted pull-up, dip)
+    | Assisted of value: decimal * unit: string  // -18   (assisted machine)
+    | Bodyweight                                 // bw
+    | Unweighted                                 // -     (no weight)
 
 /// One rep count with an optional user-defined mark, e.g. 8 or 8*.
 type Rep = { Count: int; Mark: char option }
 
-/// `[exercise] weight reps // note`
+/// `exercise @ weight x reps // note`
 type ExerciseRow =
     { Exercise: string
       Weight: Weight

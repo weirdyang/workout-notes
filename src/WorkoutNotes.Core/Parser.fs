@@ -7,30 +7,43 @@ open XParsec.CharParsers
 open XParsec.Combinators
 
 // XParsec (pure F#, compiles under Fable). Alternatives always backtrack, so no `attempt`.
-// Grammar (spec §Row grammar):
-//   row     = "[" name "]" ws [ weight ws ] reps [ ws "//" note ] ;
-//   weight  = decimal | ("+" | "-") decimal | "BW" ;
-//   reps    = rep { "," rep } ;
-//   rep     = digit { digit } [ mark ] ;
+//
+// Row grammar:
+//   row     = name "@" weight? reps note?          spaces optional around every part
+//   weight  = ["+" | "-"] number [unit] sep | "bw" sep | "-" sep
+//   sep     = "x" | "×" | spaces                    "85x3", "85 x 3", "85 3"
+//   unit    = letters                               "kg" (default), "lb", "plates"; "85kgx3" = 85 kg for 3
+//   reps    = rep { "," rep }
+//   rep     = digits [mark]
+//   note    = "//" text
+// A line is a row only if it contains "@". Older "[exercise] weight reps" lines are still read.
+
+/// The unit a number gets when none is written.
+let defaultUnit = "kg"
 
 /// Characters that can never be a rep mark.
-let reservedChars = set [ ','; '.'; '['; ']'; '/'; '+'; '-'; '−' ]
+let reservedChars = set [ ','; '.'; '['; ']'; '/'; '+'; '-'; '−'; '@'; 'x'; 'X'; '×' ]
 
 let isMarkChar (c: char) =
     not (Char.IsDigit c) && not (Char.IsWhiteSpace c) && not (reservedChars.Contains c)
+
+let normalizeUnit (u: string) =
+    match u.Trim().ToLower() with
+    | "" -> defaultUnit
+    | "kgs" -> "kg"
+    | "lbs" -> "lb"
+    | u -> u
 
 let private isBlank c = c = ' ' || c = '\t'
 let private ws1 = skipMany1Satisfies isBlank
 let private ws0 = skipManySatisfies isBlank
 let private digits = many1Chars (satisfy Char.IsDigit)
+let private isX c = c = 'x' || c = 'X' || c = '×'
 
-let private name =
-    between (pchar '[') (pchar ']') (manyChars (satisfy ((<>) ']')))
-    >>= fun s ->
-        let t = s.Trim()
-        if t = "" then fail (Message "exercise name is empty") else preturn t
+/// Between weight and reps: "x" (spaces optional) or plain spaces.
+let private sep = (ws0 >>. satisfy isX >>. ws0) <|> ws1
 
-let private decimalKg =
+let private number =
     digits .>>. opt (pchar '.' >>. digits)
     >>= fun struct (whole, frac) ->
         let text =
@@ -38,16 +51,34 @@ let private decimalKg =
             | ValueSome f -> whole + "." + f
             | ValueNone -> whole
 
-        if text.Length > 9 then fail (Message "weight too large")
-        else preturn (decimal text * 1.0m<kg>)
+        if text.Length > 9 then fail (Message "weight too large") else preturn (decimal text)
+
+/// A number, its unit and the separator. "85kgx3": the unit's trailing x before a digit is the separator.
+let private amount =
+    number .>>. manyChars (satisfy Char.IsLetter)
+    >>= fun struct (value, letters) ->
+        let endsInX = letters.Length > 0 && isX letters.[letters.Length - 1]
+
+        let withX =
+            if endsInX then
+                lookAhead (satisfy (fun c -> Char.IsDigit c || isBlank c))
+                >>. ws0
+                >>% (value, normalizeUnit (letters.Substring(0, letters.Length - 1)))
+            else
+                pzero
+
+        withX <|> (sep >>% (value, normalizeUnit letters))
 
 let private weight =
     choice
-        [ pstring "BW" >>% Bodyweight
-          pstring "bw" >>% Bodyweight
-          pchar '+' >>. decimalKg |>> Added
-          (pchar '-' <|> pchar '−') >>. decimalKg |>> Assisted
-          decimalKg |>> Load ]
+        [ pstring "bw" >>. sep >>% Bodyweight
+          pstring "BW" >>. sep >>% Bodyweight
+          pstring "Bw" >>. sep >>% Bodyweight
+          pchar '+' >>. amount |>> Added
+          (pchar '-' <|> pchar '−') >>. amount |>> Assisted
+          (pchar '-' <|> pchar '−') >>. sep >>% Unweighted
+          amount |>> Load ]
+    .>> lookAhead (satisfy Char.IsDigit)
 
 let private rep =
     digits .>>. opt (satisfy isMarkChar)
@@ -65,21 +96,43 @@ let private note =
         | ValueSome s when s.Trim() <> "" -> Some(s.Trim())
         | _ -> None
 
-let private weightThenSpace =
-    opt (weight .>> ws1 .>> lookAhead (satisfy Char.IsDigit))
-    |>> fun v ->
-        match v with
-        | ValueSome w -> w
-        | ValueNone -> Unweighted
-
-let private row =
-    pipe4 (name .>> ws1) weightThenSpace reps note (fun n w r nt ->
-        { Exercise = n
-          Weight = w
-          Reps = r
-          Note = nt })
+/// Everything after the "@".
+let private afterAt =
+    ws0 >>. (opt weight |>> fun w -> match w with ValueSome w -> w | ValueNone -> Unweighted)
+    .>>. reps
+    .>>. note
     .>> ws0
     .>> eof
+
+let private runAfterAt (name: string) (rest: string) =
+    match afterAt (Reader.ofString rest ()) with
+    | Ok parsed ->
+        let struct (struct (w, r), nt) = parsed
+        Ok { Exercise = name; Weight = w; Reps = r; Note = nt }
+    | Error err -> Error(ErrorFormatting.formatStringError rest err)
+
+// ---------------------------------------------------------------- legacy "[exercise] weight reps"
+
+let private legacyWeight =
+    choice
+        [ pstring "BW" >>% Bodyweight
+          pstring "bw" >>% Bodyweight
+          pchar '+' >>. number |>> fun v -> Added(v, defaultUnit)
+          (pchar '-' <|> pchar '−') >>. number |>> fun v -> Assisted(v, defaultUnit)
+          number |>> fun v -> Load(v, defaultUnit) ]
+
+let private legacyRow =
+    pipe4
+        (between (pchar '[') (pchar ']') (manyChars (satisfy ((<>) ']'))) .>> ws1)
+        (opt (legacyWeight .>> ws1 .>> lookAhead (satisfy Char.IsDigit))
+         |>> fun v -> match v with ValueSome w -> w | ValueNone -> Unweighted)
+        reps
+        note
+        (fun n w r nt -> { Exercise = n.Trim(); Weight = w; Reps = r; Note = nt })
+    .>> ws0
+    .>> eof
+
+// ---------------------------------------------------------------- lines
 
 /// Parse one line. Never throws: anything that isn't a valid row is kept as Text or Unparsed.
 let parseLine (line: string) : Line =
@@ -87,12 +140,30 @@ let parseLine (line: string) : Line =
 
     if trimmed = "" then
         Blank
+    elif trimmed.Contains "@" then
+        let at = trimmed.IndexOf '@'
+        let name = trimmed.Substring(0, at).Trim()
+
+        if name = "" then
+            Unparsed(line, "Exercise name missing before @")
+        else
+            match runAfterAt name (trimmed.Substring(at + 1)) with
+            | Ok row -> Exercise row
+            | Error msg -> Unparsed(line, msg)
     elif trimmed.StartsWith "[" then
-        match row (Reader.ofString trimmed ()) with
-        | Ok success -> Exercise success
-        | Error err -> Unparsed(line, ErrorFormatting.formatStringError trimmed err)
+        match legacyRow (Reader.ofString trimmed ()) with
+        | Ok row when row.Exercise <> "" -> Exercise row
+        | _ -> Line.Text trimmed
     else
         Line.Text trimmed
+
+/// The exercise name typed so far on a line: the text before "@", or the whole line when there is no "@".
+let nameOnLine (line: string) =
+    let t = line.Trim()
+    let i = t.IndexOf '@'
+    (if i >= 0 then t.Substring(0, i) else t).Trim()
+
+// ---------------------------------------------------------------- header and note
 
 /// `yyyy-MM-dd` → DateOnly, without culture APIs (runs under Fable too).
 let tryParseIsoDate (s: string) : DateOnly option =
@@ -113,7 +184,10 @@ let tryParseIsoDate (s: string) : DateOnly option =
     else
         None
 
-/// Header line: `2026-11-21 Sat · Incline + legs`. Date is required; title follows `·`.
+let private weekdays = set [ "sun"; "mon"; "tue"; "wed"; "thu"; "fri"; "sat" ]
+
+/// Header line: `2026-11-21 Sat · Incline + legs`, `2026-11-21 push` or `2026-11-21`.
+/// Date is required; the title is whatever follows it (after `·` if there is one, else after an optional weekday).
 let parseHeader (line: string) : Result<Header, string> =
     let t = line.Trim()
 
@@ -123,14 +197,22 @@ let parseHeader (line: string) : Result<Header, string> =
         match tryParseIsoDate (t.Substring(0, 10)) with
         | None -> Result.Error $"invalid date: {t.Substring(0, 10)}"
         | Some date ->
-            let title =
-                match t.IndexOf '·' with
-                | -1 -> None
-                | i ->
-                    let s = t.Substring(i + 1).Trim()
-                    if s = "" then None else Some s
+            let rest = t.Substring(10).Trim()
 
-            Result.Ok { Date = date; Title = title }
+            let title =
+                match rest.IndexOf '·' with
+                | -1 ->
+                    let words = rest.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
+
+                    if words.Length > 0 && weekdays.Contains(words.[0].ToLower()) then
+                        String.Join(" ", words.[1..])
+                    else
+                        rest
+                | i -> rest.Substring(i + 1).Trim()
+
+            Result.Ok
+                { Date = date
+                  Title = if title = "" then None else Some title }
 
 /// Parse a whole note: first non-blank line is the header, every other line is a Line.
 let parseNote (text: string) : Result<Note, string> =
@@ -148,28 +230,3 @@ let parseNote (text: string) : Result<Note, string> =
                 |> List.map parseLine
                 // drop the blank line(s) directly under the header
                 |> List.skipWhile ((=) Blank) })
-
-/// Bracket-free entry: `Low bar Smith 105 10` → `[Low bar Smith] 105 10`.
-/// Picks the shortest leading name (must contain a letter) after which the rest parses as a full row.
-/// Lines that already start with `[`, blanks and free text that doesn't end in a row come back unchanged.
-let normalizeLine (line: string) : string =
-    let t = line.Trim()
-
-    if t = "" || t.StartsWith "[" || t.StartsWith "//" then
-        line
-    else
-        let words = t.Split([| ' '; '\t' |], StringSplitOptions.RemoveEmptyEntries)
-
-        seq { 1 .. words.Length - 1 }
-        |> Seq.tryPick (fun k ->
-            let name = String.Join(" ", words.[.. k - 1])
-            let rest = String.Join(" ", words.[k..])
-            let candidate = $"[{name}] {rest}"
-
-            if name |> Seq.exists Char.IsLetter then
-                match parseLine candidate with
-                | Exercise _ -> Some candidate
-                | _ -> None
-            else
-                None)
-        |> Option.defaultValue line

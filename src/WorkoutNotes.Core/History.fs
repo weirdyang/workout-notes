@@ -62,15 +62,15 @@ let badge (legend: Legend) (all: DatedRow list) (target: DatedRow) : Badge optio
     match bestReps legend target.Row with
     | None -> None
     | Some reps ->
-        let priorLoads =
+        let priorLoads unit =
             priors
             |> List.choose (fun r ->
                 match r.Row.Weight with
-                | Load w -> Some w
+                | Load(w, u) when u = unit -> Some w
                 | _ -> None)
 
         match target.Row.Weight with
-        | Load w when not priorLoads.IsEmpty && w > List.max priorLoads -> Some LoadHigh
+        | Load(w, u) when not (priorLoads u).IsEmpty && w > List.max (priorLoads u) -> Some LoadHigh
         | weight ->
             let atWeight =
                 priors
@@ -89,7 +89,7 @@ let badge (legend: Legend) (all: DatedRow list) (target: DatedRow) : Badge optio
 /// Badges for every row in one pass (same rules as `badge`), keyed by (NoteId, Index).
 /// `rows` must be oldest first, as `rowsOf` returns them.
 let allBadges (legend: Legend) (rows: DatedRow list) : Map<string * int, Badge> =
-    let mutable maxLoad: Map<string, decimal<kg>> = Map.empty
+    let mutable maxLoad: Map<string * string, decimal> = Map.empty
     let mutable bestAt: Map<string * Weight, int> = Map.empty
     let mutable result = Map.empty
 
@@ -100,8 +100,13 @@ let allBadges (legend: Legend) (rows: DatedRow list) : Map<string * int, Badge> 
         | None -> ()
         | Some reps ->
             let b =
-                match r.Row.Weight, Map.tryFind key maxLoad with
-                | Load w, Some m when w > m -> Some LoadHigh
+                let loadKey =
+                    match r.Row.Weight with
+                    | Load(_, u) -> Some(key, u)
+                    | _ -> None
+
+                match r.Row.Weight, loadKey |> Option.bind (fun k -> Map.tryFind k maxLoad) with
+                | Load(w, _), Some m when w > m -> Some LoadHigh
                 | weight, _ ->
                     match Map.tryFind (key, weight) bestAt with
                     | Some best when reps > best -> Some RepHigh
@@ -115,9 +120,9 @@ let allBadges (legend: Legend) (rows: DatedRow list) : Map<string * int, Badge> 
 
         // a row with no countable reps still counts as a load done (matches `badge`, which uses all prior loads)
         match r.Row.Weight with
-        | Load w ->
-            let prev = Map.tryFind key maxLoad
-            if prev.IsNone || w > prev.Value then maxLoad <- Map.add key w maxLoad
+        | Load(w, u) ->
+            let prev = Map.tryFind (key, u) maxLoad
+            if prev.IsNone || w > prev.Value then maxLoad <- Map.add (key, u) w maxLoad
         | _ -> ()
 
     result
@@ -155,11 +160,11 @@ let bestsByWeight (legend: Legend) (all: DatedRow list) (exercise: string) =
                 Some(weight, best, first.Date))
     |> List.sortByDescending (fun (w, _, _) ->
         match w with
-        | Load d
-        | Added d -> decimal d
-        | Assisted d -> -(decimal d)
-        | Bodyweight
-        | Unweighted -> 0m)
+        | Load(d, u) -> 3, u, d
+        | Added(d, u) -> 2, u, d
+        | Bodyweight -> 1, "", 0m
+        | Assisted(d, u) -> 0, u, -d
+        | Unweighted -> -1, "", 0m)
 
 /// Best e1RM across all rows of an exercise, with the row it came from.
 let bestE1rm (legend: Legend) (all: DatedRow list) (exercise: string) =

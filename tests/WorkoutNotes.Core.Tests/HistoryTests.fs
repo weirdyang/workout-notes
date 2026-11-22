@@ -14,8 +14,8 @@ let note (text: string) =
     | Error e -> failwith e
 
 let notes =
-    [ "a", note "2026-11-14 Sat\n\n[Incline] 92.5 2\n[Incline] 85 5,5,5\n[Incline] 75 9"
-      "b", note "2026-11-21 Sat\n\n[Incline] 92.5 3\n[Incline] 85 6,6,6\n[Incline] 75 9*\n[incline]  85 6\n[Split squat] 90 5,5,5" ]
+    [ "a", note "2026-11-14 Sat\n\nIncline @ 92.5x2\nIncline @ 85x5,5,5\nIncline @ 75x9"
+      "b", note "2026-11-21 Sat\n\nIncline @ 92.5x3\nIncline @ 85x6,6,6\nIncline @ 75x9*\nincline  @ 85kg x 6\nSplit squat @ 90x5,5,5" ]
 
 let all = rowsOf notes
 let rowsIn id = all |> List.filter (fun r -> r.NoteId = id)
@@ -33,7 +33,7 @@ let ``first session has no badges`` () =
 
 [<Fact>]
 let ``load high beats every earlier load`` () =
-    let extra = note "2026-11-28 Sat\n\n[Incline] 95 1"
+    let extra = note "2026-11-28 Sat\n\nIncline @ 95x1"
     let all = rowsOf (notes @ [ "c", extra ])
     let target = all |> List.find (fun r -> r.NoteId = "c")
     Assert.Equal(Some LoadHigh, badge legend all target)
@@ -49,7 +49,7 @@ let ``last session skips the current note`` () =
 [<Fact>]
 let ``bests by weight, heaviest first`` () =
     let bests = bestsByWeight legend all "Incline" |> List.map (fun (w, b, _) -> w, b)
-    Assert.Equal<(Weight * int) list>([ Load 92.5m<kg>, 3; Load 85m<kg>, 6; Load 75m<kg>, 9 ], bests)
+    Assert.Equal<(Weight * int) list>([ Load(92.5m, "kg"), 3; Load(85m, "kg"), 6; Load(75m, "kg"), 9 ], bests)
 
 [<Fact>]
 let ``exercise names, latest first, case-insensitive`` () =
@@ -57,8 +57,16 @@ let ``exercise names, latest first, case-insensitive`` () =
 
 [<Fact>]
 let ``allBadges agrees with badge`` () =
-    let extra = note "2026-11-28 Sat\n\n[Incline] 95 1\n[Incline] 95 1\n[Incline] 75 10*\n[Split squat] 90 6,6\n[Split squat] 92.5 3"
+    let extra = note "2026-11-28 Sat\n\nIncline @ 95x1\nIncline @ 95x1\nIncline @ 75x10*\nSplit squat @ 90x6,6\nSplit squat @ 92.5x3\nIncline @ 200lbx1\nIncline @ 210lbx1"
     let all = rowsOf (notes @ [ "c", extra ])
     let fast = allBadges legend all
     for r in all do
         Assert.Equal(badge legend all r, Map.tryFind (r.NoteId, r.Index) fast)
+
+[<Fact>]
+let ``loads only compare within a unit`` () =
+    let extra = note "2026-11-28 Sat\n\nIncline @ 200lbx1\nIncline @ 210lbx1"
+    let all = rowsOf (notes @ [ "c", extra ])
+    let rows = all |> List.filter (fun r -> r.NoteId = "c")
+    // 200 lb is the first lb load: no badge, even though 200 > 92.5 (kg)
+    Assert.Equal<Badge option list>([ None; Some LoadHigh ], rows |> List.map (badge legend all))

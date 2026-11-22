@@ -17,6 +17,7 @@ let currentLine (text: string) (pos: int) =
 
 /// Text of the current line up to the caret.
 let beforeCaret (text: string) (pos: int) =
+    let pos = max 0 (min pos text.Length)
     let s, _ = lineBounds text pos
     text.Substring(s, max 0 (pos - s))
 

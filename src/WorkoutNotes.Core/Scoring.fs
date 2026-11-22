@@ -14,13 +14,13 @@ let countsForHighs (legend: Legend) (r: Rep) =
     | _ -> true
 
 /// Epley: weight × (1 + reps/30).
-let epley (w: decimal<kg>) (reps: int) : decimal<kg> =
-    if reps <= 0 then 0.0m<kg> else w * (1.0m + decimal reps / 30.0m)
+let epley (w: decimal) (reps: int) : decimal =
+    if reps <= 0 then 0.0m else w * (1.0m + decimal reps / 30.0m)
 
 /// Best e1RM in a row, using only reps that count for highs. Only plain loads have an e1RM.
-let bestE1rm (legend: Legend) (row: ExerciseRow) : decimal<kg> option =
+let bestE1rm (legend: Legend) (row: ExerciseRow) : decimal option =
     match row.Weight with
-    | Load w ->
+    | Load(w, _) ->
         row.Reps
         |> List.filter (countsForHighs legend)
         |> List.map (fun r -> epley w r.Count)
