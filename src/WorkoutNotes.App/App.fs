@@ -15,6 +15,12 @@ type Page =
     | ExerciseHistory of exercise: string * back: Page
     | LegendPage
 
+type MarkDraft =
+    { Editing: char option
+      Symbol: string
+      Label: string
+      Behaviour: Behaviour }
+
 type Model =
     { Notes: StoredNote list
       Parsed: Map<string, Note option>
@@ -24,7 +30,7 @@ type Model =
       Page: Page
       Search: string
       Caret: int
-      NewMark: string
+      MarkEditor: MarkDraft option
       EditorHasFocus: bool
       HelpOpen: bool
       Toast: string option }
@@ -44,11 +50,13 @@ type Msg =
     | SetSearch of string
     | ExportNotes
     | ImportNotes of string
-    | SetMarkLabel of char * string
-    | SetMarkBehaviour of char * Behaviour
+    | OpenMarkEditor of existing: char option * symbol: string
+    | EditDraftSymbol of string
+    | EditDraftLabel of string
+    | EditDraftBehaviour of Behaviour
+    | SaveMark
     | DeleteMark of char
-    | SetNewMark of string
-    | AddMark
+    | CloseMarkEditor
     | OpenHelp
     | CloseHelp
     | ShowToast of string
@@ -109,7 +117,7 @@ let init () =
       Page = NotesList
       Search = ""
       Caret = 0
-      NewMark = ""
+      MarkEditor = None
       EditorHasFocus = false
       HelpOpen = false
       Toast = None }
@@ -272,6 +280,37 @@ let private removeNoteIfEmpty (model: Model) id =
         { model with Notes = notes } |> recomputeFromNotes (Some [])
     | _ -> model
 
+let private whyNotAMark (symbol: char) =
+    if Char.IsDigit symbol then Some "Digits are reps"
+    elif Char.IsWhiteSpace symbol then Some "Pick a visible character"
+    else
+        match symbol with
+        | 'x' | 'X' | '×' -> Some "x separates weight and reps"
+        | ',' -> Some "A comma separates sets"
+        | '@' -> Some "@ comes before the weight"
+        | '.' -> Some "Used in weights like 92.5"
+        | '+' | '-' | '−' -> Some "Used for added and assisted weight"
+        | '/' -> Some "// starts a note"
+        | '[' | ']' -> Some "Used by old-style rows"
+        | _ when not (Parser.isMarkChar symbol) -> Some "Can't be a mark"
+        | _ -> None
+
+let private problemWithDraft (legend: MarkDef list) (draft: MarkDraft) =
+    let takenBy (symbol: char) =
+        legend |> List.tryFind (fun mark -> mark.Symbol = symbol && Some symbol <> draft.Editing)
+
+    if draft.Symbol.Length <> 1 then
+        Some "Pick one symbol"
+    else
+        match whyNotAMark draft.Symbol.[0], takenBy draft.Symbol.[0] with
+        | Some reason, _ -> Some reason
+        | None, Some other -> Some $"{other.Symbol} already means {other.Label}"
+        | None, None when draft.Label.Trim() = "" -> Some "Say what it means"
+        | None, None -> None
+
+let private repsUsingMark (rows: DatedRow list) (symbol: char) =
+    rows |> List.sumBy (fun row -> row.Row.Reps |> List.filter (fun rep -> rep.Mark = Some symbol) |> List.length)
+
 let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     match msg with
     | OpenNote id -> { model with Page = Editor id }, Cmd.none
@@ -367,36 +406,58 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         saveNotes notes
         { model with Notes = notes } |> recomputeFromNotes None, showToast $"Imported {added.Length} notes"
 
-    | SetMarkLabel(sym, label) ->
-        let legend = model.Legend |> List.map (fun m -> if m.Symbol = sym then { m with Label = label } else m)
-        saveLegend legend
-        { model with Legend = legend }, Cmd.none
+    | OpenMarkEditor(existing, symbol) ->
+        let existingMark =
+            existing |> Option.bind (fun symbol -> model.Legend |> List.tryFind (fun mark -> mark.Symbol = symbol))
 
-    | SetMarkBehaviour(sym, b) ->
-        let legend = model.Legend |> List.map (fun m -> if m.Symbol = sym then { m with Behaviour = b } else m)
-        saveLegend legend
-        { model with Legend = legend } |> recomputeFromNotes (Some []), Cmd.none
+        let draft =
+            match existingMark with
+            | Some mark ->
+                { Editing = Some mark.Symbol
+                  Symbol = string mark.Symbol
+                  Label = mark.Label
+                  Behaviour = mark.Behaviour }
+            | None ->
+                { Editing = None
+                  Symbol = symbol
+                  Label = ""
+                  Behaviour = NoHighs }
 
-    | DeleteMark sym ->
-        let legend = model.Legend |> List.filter (fun m -> m.Symbol <> sym)
-        saveLegend legend
-        { model with Legend = legend } |> recomputeFromNotes (Some []), Cmd.none
+        { model with MarkEditor = Some draft }, Cmd.none
 
-    | SetNewMark s -> { model with NewMark = s }, Cmd.none
+    | EditDraftSymbol symbol ->
+        let lastTyped = if symbol.Length > 1 then symbol.Substring(symbol.Length - 1) else symbol
+        { model with MarkEditor = model.MarkEditor |> Option.map (fun draft -> { draft with Symbol = lastTyped }) }, Cmd.none
 
-    | AddMark ->
-        let s = model.NewMark.Trim()
+    | EditDraftLabel label ->
+        { model with MarkEditor = model.MarkEditor |> Option.map (fun draft -> { draft with Label = label }) }, Cmd.none
 
-        if s.Length <> 1 then
-            model, showToast "A mark is one character"
-        elif not (Parser.isMarkChar s.[0]) then
-            model, showToast $"'{s}' can't be a mark"
-        elif model.Legend |> List.exists (fun m -> m.Symbol = s.[0]) then
-            model, showToast $"'{s}' is already defined"
-        else
-            let legend = model.Legend @ [ { Symbol = s.[0]; Label = "New mark"; Behaviour = LabelOnly } ]
+    | EditDraftBehaviour behaviour ->
+        { model with MarkEditor = model.MarkEditor |> Option.map (fun draft -> { draft with Behaviour = behaviour }) }, Cmd.none
+
+    | SaveMark ->
+        match model.MarkEditor with
+        | Some draft when (problemWithDraft model.Legend draft).IsNone ->
+            let mark =
+                { Symbol = draft.Symbol.[0]
+                  Label = draft.Label.Trim()
+                  Behaviour = draft.Behaviour }
+
+            let legend =
+                match draft.Editing with
+                | Some original -> model.Legend |> List.map (fun existing -> if existing.Symbol = original then mark else existing)
+                | None -> model.Legend @ [ mark ]
+
             saveLegend legend
-            { model with Legend = legend; NewMark = "" } |> recomputeFromNotes (Some []), Cmd.none
+            { model with Legend = legend; MarkEditor = None } |> recomputeFromNotes (Some []), Cmd.none
+        | _ -> model, Cmd.none
+
+    | DeleteMark symbol ->
+        let legend = model.Legend |> List.filter (fun mark -> mark.Symbol <> symbol)
+        saveLegend legend
+        { model with Legend = legend; MarkEditor = None } |> recomputeFromNotes (Some []), Cmd.none
+
+    | CloseMarkEditor -> { model with MarkEditor = None }, Cmd.none
 
     | OpenHelp -> { model with HelpOpen = true }, Cmd.none
     | CloseHelp -> { model with HelpOpen = false }, Cmd.none
@@ -887,17 +948,162 @@ let private historyView (model: Model) (name: string) dispatch =
         ]
     ]
 
+let private effectTitle =
+    function
+    | LabelOnly -> "Just a label"
+    | NoHighs -> "Doesn't count for PRs"
+    | ExcludeFromCount -> "Doesn't count at all"
+
+let private effectExample (symbol: string) =
+    function
+    | LabelOnly -> $"8{symbol} counts like any other rep"
+    | NoHighs -> $"8{symbol} counts toward volume, but can't set a rep or load high"
+    | ExcludeFromCount -> $"8{symbol} stays in the note, left out of volume and PRs"
+
+let private chevronRight =
+    icon """<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>"""
+
+let private plusSmall =
+    icon """<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>"""
+
+let private markEditorView (model: Model) (draft: MarkDraft) dispatch =
+    let problem = problemWithDraft model.Legend draft
+    let shownSymbol =
+        if draft.Symbol.Length = 1 && (whyNotAMark draft.Symbol.[0]).IsNone then draft.Symbol else "*"
+
+    let taken =
+        model.Legend |> List.map (fun mark -> mark.Symbol) |> List.filter (fun symbol -> Some symbol <> draft.Editing)
+
+    let quickPicks =
+        [ '*'; '#'; '!'; '^'; '~'; '?'; '%'; '&'; 'w'; 'p' ]
+        |> List.filter (fun symbol -> not (List.contains symbol taken))
+
+    let usage =
+        draft.Editing |> Option.map (repsUsingMark model.Rows) |> Option.defaultValue 0
+
+    Html.div [
+        prop.className "sheet-backdrop"
+        prop.onClick (fun _ -> dispatch CloseMarkEditor)
+        prop.children [
+            Html.div [
+                prop.className "sheet"
+                prop.role "dialog"
+                prop.ariaLabel (if draft.Editing.IsSome then "Edit mark" else "New mark")
+                prop.onClick (fun e -> e.stopPropagation ())
+                prop.children [
+                    Html.div [
+                        prop.className "sheet-head"
+                        prop.children [
+                            Html.button [ prop.className "link"; prop.onClick (fun _ -> dispatch CloseMarkEditor); prop.text "Cancel" ]
+                            Html.h2 (if draft.Editing.IsSome then "Edit mark" else "New mark")
+                            Html.button [
+                                prop.className "link strong"
+                                prop.disabled problem.IsSome
+                                prop.onClick (fun _ -> dispatch SaveMark)
+                                prop.text "Save"
+                            ]
+                        ]
+                    ]
+                    Html.label [
+                        prop.className "field"
+                        prop.children [
+                            Html.span [ prop.className "field-label"; prop.text "Symbol" ]
+                            Html.div [
+                                prop.className "symbol-row"
+                                prop.children [
+                                    Html.input [
+                                        prop.className "symbol-input"
+                                        prop.value draft.Symbol
+                                        prop.placeholder "*"
+                                        prop.custom ("autoCapitalize", "off")
+                                        prop.autoComplete "off"
+                                        prop.onChange (fun (text: string) -> dispatch (EditDraftSymbol text))
+                                    ]
+                                    Html.div [
+                                        prop.className "quick-picks"
+                                        prop.children [
+                                            for symbol in quickPicks do
+                                                Html.button [
+                                                    prop.key (string symbol)
+                                                    prop.className (if draft.Symbol = string symbol then "pick picked" else "pick")
+                                                    prop.onClick (fun e ->
+                                                        e.preventDefault ()
+                                                        dispatch (EditDraftSymbol(string symbol)))
+                                                    prop.text (string symbol)
+                                                ]
+                                        ]
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ]
+                    match problem with
+                    | Some reason when draft.Symbol <> "" || draft.Label <> "" -> Html.p [ prop.className "field-problem"; prop.text reason ]
+                    | _ -> ()
+                    Html.label [
+                        prop.className "field"
+                        prop.children [
+                            Html.span [ prop.className "field-label"; prop.text "Meaning" ]
+                            Html.input [
+                                prop.className "text-input"
+                                prop.value draft.Label
+                                prop.placeholder "Grind, paused, warm-up…"
+                                prop.onChange (fun (text: string) -> dispatch (EditDraftLabel text))
+                            ]
+                        ]
+                    ]
+                    Html.div [
+                        prop.className "field"
+                        prop.role "radiogroup"
+                        prop.ariaLabel "Effect"
+                        prop.children [
+                            Html.span [ prop.className "field-label"; prop.text "Effect" ]
+                            for behaviour in [ LabelOnly; NoHighs; ExcludeFromCount ] do
+                                Html.button [
+                                    prop.key (effectTitle behaviour)
+                                    prop.role "radio"
+                                    prop.ariaChecked (draft.Behaviour = behaviour)
+                                    prop.className (if draft.Behaviour = behaviour then "effect chosen" else "effect")
+                                    prop.onClick (fun _ -> dispatch (EditDraftBehaviour behaviour))
+                                    prop.children [
+                                        Html.span [ prop.className "effect-dot" ]
+                                        Html.span [
+                                            prop.className "effect-text"
+                                            prop.children [
+                                                Html.span [ prop.className "effect-title"; prop.text (effectTitle behaviour) ]
+                                                Html.span [ prop.className "effect-example"; prop.text (effectExample shownSymbol behaviour) ]
+                                            ]
+                                        ]
+                                    ]
+                                ]
+                        ]
+                    ]
+                    match draft.Editing with
+                    | Some original ->
+                        Html.div [
+                            prop.className "sheet-footer"
+                            prop.children [
+                                Html.span [
+                                    prop.className "usage"
+                                    prop.text (
+                                        match usage with
+                                        | 0 -> "Not used in any note yet."
+                                        | 1 -> $"1 rep uses {original}."
+                                        | n -> $"{n} reps use {original}. Deleting leaves them undefined."
+                                    )
+                                ]
+                                Html.button [ prop.className "link danger"; prop.onClick (fun _ -> dispatch (DeleteMark original)); prop.text "Delete" ]
+                            ]
+                        ]
+                    | None -> ()
+                ]
+            ]
+        ]
+    ]
+
 let private legendView (model: Model) dispatch =
     let undefinedMarks =
         Scoring.undefinedMarks (legendMap model.Legend) (model.Rows |> List.map (fun r -> r.Row))
-
-    let behaviours = [ LabelOnly; NoHighs; ExcludeFromCount ]
-
-    let behaviourValue =
-        function
-        | LabelOnly -> "label"
-        | NoHighs -> "nohighs"
-        | ExcludeFromCount -> "exclude"
 
     Html.div [
         prop.className "screen"
@@ -911,53 +1117,44 @@ let private legendView (model: Model) dispatch =
                     Html.div [
                         prop.className "panel"
                         prop.children [
-                            for m in model.Legend do
-                                Html.div [
-                                    prop.key (string m.Symbol)
+                            for mark in model.Legend do
+                                Html.button [
+                                    prop.key (string mark.Symbol)
                                     prop.className "mark"
+                                    prop.ariaLabel $"Edit mark {mark.Symbol}"
+                                    prop.onClick (fun _ -> dispatch (OpenMarkEditor(Some mark.Symbol, "")))
                                     prop.children [
-                                        Html.span [ prop.className "sym"; prop.text (string m.Symbol) ]
-                                        Html.div [
+                                        Html.span [ prop.className "sym"; prop.text (string mark.Symbol) ]
+                                        Html.span [
+                                            prop.className "mark-text"
                                             prop.children [
-                                                Html.input [
-                                                    prop.ariaLabel $"Label for {m.Symbol}"
-                                                    prop.value m.Label
-                                                    prop.onChange (fun (s: string) -> dispatch (SetMarkLabel(m.Symbol, s)))
-                                                ]
-                                                Html.select [
-                                                    prop.ariaLabel $"What {m.Symbol} does"
-                                                    prop.value (behaviourValue m.Behaviour)
-                                                    prop.onChange (fun (s: string) -> dispatch (SetMarkBehaviour(m.Symbol, behaviourOfString s)))
-                                                    prop.children [
-                                                        for b in behaviours do
-                                                            Html.option [ prop.value (behaviourValue b); prop.text (behaviourName b) ]
-                                                    ]
-                                                ]
+                                                Html.span [ prop.className "mark-label"; prop.text mark.Label ]
+                                                Html.span [ prop.className "mark-effect"; prop.text (effectTitle mark.Behaviour) ]
                                             ]
                                         ]
-                                        Html.button [ prop.className "icon-btn danger"; prop.ariaLabel $"Remove mark {m.Symbol}"; prop.onClick (fun _ -> dispatch (DeleteMark m.Symbol)); prop.text "×" ]
+                                        chevronRight
                                     ]
                                 ]
-                            Html.div [
-                                prop.className "addmark"
-                                prop.children [
-                                    Html.input [
-                                        prop.className "sym"
-                                        prop.ariaLabel "New mark symbol"
-                                        prop.maxLength 1
-                                        prop.placeholder "^"
-                                        prop.value model.NewMark
-                                        prop.onChange (fun (s: string) -> dispatch (SetNewMark s))
-                                    ]
-                                    Html.button [ prop.className "link"; prop.onClick (fun _ -> dispatch AddMark); prop.text "Add mark" ]
-                                ]
+                            Html.button [
+                                prop.className "link add-mark"
+                                prop.onClick (fun _ -> dispatch (OpenMarkEditor(None, "")))
+                                prop.children [ plusSmall; Html.text "Add mark" ]
                             ]
                         ]
                     ]
                     if not undefinedMarks.IsEmpty then
-                        Html.p [
+                        Html.div [
                             prop.className "note-text"
-                            prop.text $"""Used in your notes but not defined: {undefinedMarks |> Seq.map string |> String.concat " "}. Add them above to give them a meaning."""
+                            prop.children [
+                                Html.text "Used in your notes but not defined: "
+                                for symbol in undefinedMarks do
+                                    Html.button [
+                                        prop.key (string symbol)
+                                        prop.className "chip"
+                                        prop.onClick (fun _ -> dispatch (OpenMarkEditor(None, string symbol)))
+                                        prop.text (string symbol)
+                                    ]
+                            ]
                         ]
                     Html.div [ prop.className "section-label"; prop.text "Backup" ]
                     Html.div [
@@ -1053,7 +1250,7 @@ let private helpView (model: Model) dispatch =
                     ]
                     section "Marks" [
                         for mark in model.Legend do
-                            example $"8{mark.Symbol}" $"{mark.Label} · {behaviourName mark.Behaviour}"
+                            example $"8{mark.Symbol}" $"{mark.Label} · {effectTitle mark.Behaviour}"
                         Html.p [ prop.className "help-note"; prop.text "Edit marks in Legend (the sliders icon on Notes)." ]
                     ]
                     section "While typing" [
@@ -1076,6 +1273,9 @@ let view (model: Model) dispatch =
             | ExerciseHistory(name, _) -> historyView model name dispatch
             | LegendPage -> legendView model dispatch
             if model.HelpOpen then helpView model dispatch
+            match model.MarkEditor with
+            | Some draft -> markEditorView model draft dispatch
+            | None -> ()
             match model.Toast with
             | Some t -> Html.div [ prop.className "toast"; prop.role "status"; prop.text t ]
             | None -> ()

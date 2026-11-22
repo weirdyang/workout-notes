@@ -82,13 +82,7 @@ textarea.editor { flex: 1; min-height: 160px; width: 100%; resize: none; border:
 .sess .d { font-size: 14px; font-weight: 600; padding-bottom: 4px; }
 .sess .l { font: 14px/1.6 var(--mono); color: #c9ccd1; }
 
-.mark { display: grid; grid-template-columns: 40px minmax(0, 1fr) 36px; align-items: center; gap: 10px; min-height: 64px; border-bottom: 1px solid #23262b; }
-.mark .sym { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 8px; background: var(--key); font: 700 18px var(--mono); }
-.mark input, .mark select, .addmark input { background: none; border: 0; color: var(--text); font: 500 16px var(--sans); outline: none; width: 100%; padding: 2px 0; }
-.mark select { font: 13px var(--sans); color: var(--muted); }
-.mark select option { background: var(--surface); color: var(--text); }
 .addmark { display: flex; align-items: center; gap: 10px; min-height: 52px; }
-.addmark input.sym { width: 44px; text-align: center; font: 700 18px var(--mono); background: var(--key); border-radius: 8px; height: 36px; }
 .note-text { font-size: 12px; color: var(--muted); padding: 8px 20px 0; line-height: 1.5; }
 .danger { color: var(--danger); }
 
@@ -112,3 +106,35 @@ textarea.editor { flex: 1; min-height: 160px; width: 100%; resize: none; border:
 .help-row code { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .help-row span.badge { color: var(--accent); }
 .help-row span.badge.tie { color: #c9ccd1; }
+
+.mark { display: grid; grid-template-columns: 40px minmax(0, 1fr) 20px; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 0; background: none; border: 0; border-bottom: 1px solid #23262b; text-align: left; cursor: pointer; color: var(--text); }
+.mark .sym { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 8px; background: var(--key); font: 700 18px var(--mono); }
+.mark-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mark-label { font-size: 16px; font-weight: 500; }
+.mark-effect { font-size: 13px; color: var(--muted); }
+.mark > span:last-child { color: var(--faint); }
+.add-mark { gap: 6px; padding: 0; min-height: 52px; }
+.chip { margin-left: 6px; }
+
+.sheet-head h2 { font-size: 17px; }
+.link:disabled { color: #5c6068; cursor: default; }
+.field { display: flex; flex-direction: column; gap: 8px; padding-top: 18px; }
+.field-label { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.symbol-row { display: flex; align-items: center; gap: 12px; }
+.symbol-input { width: 56px; height: 48px; flex: none; text-align: center; border-radius: 10px; border: 1px solid #2d3036; background: #000; color: var(--accent); font: 700 24px var(--mono); outline: none; }
+.symbol-input:focus { border-color: var(--accent); }
+.quick-picks { display: flex; gap: 6px; flex-wrap: wrap; }
+.pick { width: 40px; height: 40px; border-radius: 8px; border: 1px solid #2d3036; background: var(--key); color: var(--text); font: 600 17px var(--mono); cursor: pointer; }
+.pick.picked { background: #000; color: var(--accent); border-color: var(--accent); }
+.text-input { height: 48px; border-radius: 10px; border: 1px solid #2d3036; background: #000; color: var(--text); font: 16px var(--sans); padding: 0 14px; outline: none; }
+.text-input:focus { border-color: var(--accent); }
+.effect { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid #2d3036; background: #000; color: var(--text); text-align: left; cursor: pointer; }
+.effect.chosen { border-color: var(--accent); }
+.effect-dot { flex: none; width: 18px; height: 18px; margin-top: 2px; border-radius: 50%; border: 2px solid #5c6068; }
+.effect.chosen .effect-dot { border-color: var(--accent); background: radial-gradient(var(--accent) 0 4px, transparent 5px); }
+.effect-text { display: flex; flex-direction: column; gap: 3px; }
+.effect-title { font-size: 15px; font-weight: 600; }
+.effect-example { font-size: 13px; color: var(--muted); }
+.field-problem { color: var(--danger); font-size: 14px; margin: 10px 0 0; }
+.sheet-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 22px; padding-top: 14px; border-top: 1px solid #23262b; }
+.usage { font-size: 13px; color: var(--muted); }
