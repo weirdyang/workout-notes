@@ -23,8 +23,6 @@ let rowsIn id = all |> List.filter (fun r -> r.NoteId = id)
 [<Fact>]
 let ``badges on the second session`` () =
     let badges = rowsIn "b" |> List.map (badge legend all)
-    // 92.5 x3 > x2 → rep high; 85 x6 > x5 → rep high; 75 x9* doesn't count; incline 85 x6 ties the line above;
-    // split squat is a first exposure → nothing
     Assert.Equal<Badge option list>([ Some RepHigh; Some RepHigh; None; Some Tie; None ], badges)
 
 [<Fact>]
@@ -53,7 +51,7 @@ let ``bests by weight, heaviest first`` () =
 
 [<Fact>]
 let ``exercise names, latest first, case-insensitive`` () =
-    Assert.Equal<string list>([ "Split squat"; "incline" ], exerciseNames all)
+    Assert.Equal<string list>([ "Split squat"; "incline" ], exerciseNamesMostRecentFirst all)
 
 [<Fact>]
 let ``allBadges agrees with badge`` () =
@@ -68,5 +66,4 @@ let ``loads only compare within a unit`` () =
     let extra = note "2026-11-28 Sat\n\nIncline @ 200lbx1\nIncline @ 210lbx1"
     let all = rowsOf (notes @ [ "c", extra ])
     let rows = all |> List.filter (fun r -> r.NoteId = "c")
-    // 200 lb is the first lb load: no badge, even though 200 > 92.5 (kg)
     Assert.Equal<Badge option list>([ None; Some LoadHigh ], rows |> List.map (badge legend all))

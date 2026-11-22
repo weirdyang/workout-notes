@@ -1,6 +1,4 @@
 @echo off
-rem Remove build outputs (dotnet clean).
-rem Double-click to run. Output goes to the window and to scripts\logs\clean.log
 setlocal
 cd /d "%~dp0.."
 if not exist scripts\logs mkdir scripts\logs

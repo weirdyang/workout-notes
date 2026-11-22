@@ -9,8 +9,6 @@ open WorkoutNotes.Core
 open WorkoutNotes.Core.History
 open Storage
 
-// ---------------------------------------------------------------- model
-
 type Page =
     | NotesList
     | Editor of noteId: string
@@ -27,7 +25,8 @@ type Model =
       Search: string
       Caret: int
       NewMark: string
-      Focused: bool
+      EditorHasFocus: bool
+      HelpOpen: bool
       Toast: string option }
 
 type Msg =
@@ -50,6 +49,8 @@ type Msg =
     | DeleteMark of char
     | SetNewMark of string
     | AddMark
+    | OpenHelp
+    | CloseHelp
     | ShowToast of string
     | ClearToast
 
@@ -60,23 +61,22 @@ let today () =
     let n = DateTime.Now
     DateOnly(n.Year, n.Month, n.Day)
 
-let private parseStored (n: StoredNote) =
+let private tryParseStoredNote (n: StoredNote) =
     match Parser.parseNote n.Text with
     | Ok note -> Some note
     | Error _ -> None
 
-/// Recompute everything derived from the notes. Only `changed` notes are re-parsed.
-let private derive (changed: string list option) (model: Model) =
+let private recomputeFromNotes (reparseOnlyNoteIds: string list option) (model: Model) =
     let parsed =
-        match changed with
-        | None -> model.Notes |> List.map (fun n -> n.Id, parseStored n) |> Map.ofList
+        match reparseOnlyNoteIds with
+        | None -> model.Notes |> List.map (fun n -> n.Id, tryParseStoredNote n) |> Map.ofList
         | Some ids ->
             let keep = model.Notes |> List.map (fun n -> n.Id) |> Set.ofList
             let current = model.Parsed |> Map.filter (fun id _ -> keep.Contains id)
 
             model.Notes
             |> List.filter (fun n -> List.contains n.Id ids || not (current.ContainsKey n.Id))
-            |> List.fold (fun acc n -> Map.add n.Id (parseStored n) acc) current
+            |> List.fold (fun acc n -> Map.add n.Id (tryParseStoredNote n) acc) current
 
     let rows =
         parsed |> Map.toSeq |> Seq.choose (fun (id, n) -> n |> Option.map (fun n -> id, n)) |> rowsOf
@@ -86,8 +86,7 @@ let private derive (changed: string list option) (model: Model) =
         Rows = rows
         Badges = allBadges (legendMap model.Legend) rows }
 
-/// Rewrite old "[exercise] weight reps" lines into the current format, once, on load.
-let private upgradeNotes (notes: StoredNote list) =
+let private convertBracketRowsToAtFormat (notes: StoredNote list) =
     let upgraded =
         notes
         |> List.map (fun n ->
@@ -102,7 +101,7 @@ let private upgradeNotes (notes: StoredNote list) =
     upgraded
 
 let init () =
-    { Notes = loadNotes () |> upgradeNotes
+    { Notes = loadNotes () |> convertBracketRowsToAtFormat
       Parsed = Map.empty
       Rows = []
       Badges = Map.empty
@@ -111,30 +110,29 @@ let init () =
       Search = ""
       Caret = 0
       NewMark = ""
-      Focused = false
+      EditorHasFocus = false
+      HelpOpen = false
       Toast = None }
-    |> derive None,
+    |> recomputeFromNotes None,
     Cmd.none
 
-// ---------------------------------------------------------------- helpers
-
-let private setCaret (pos: int) : Cmd<Msg> =
+let private focusEditorAt (caret: int) : Cmd<Msg> =
     Cmd.ofEffect (fun _ ->
         JS.setTimeout
             (fun () ->
                 match document.getElementById "editor" with
                 | null -> ()
-                | el ->
-                    let ta = el :?> Types.HTMLTextAreaElement
-                    ta.focus ()
-                    ta.setSelectionRange (pos, pos))
+                | element ->
+                    let editor = element :?> Types.HTMLTextAreaElement
+                    editor.focus ()
+                    editor.setSelectionRange (caret, caret))
             0
         |> ignore)
 
-let private toastCmd (text: string) : Cmd<Msg> =
+let private showToast (text: string) : Cmd<Msg> =
     Cmd.ofMsg (ShowToast text)
 
-let private noteById (model: Model) id =
+let private tryFindNote (model: Model) id =
     model.Notes |> List.tryFind (fun n -> n.Id = id)
 
 let private updateNoteText (id: string) (text: string) (model: Model) =
@@ -153,7 +151,7 @@ let private updateNoteText (id: string) (text: string) (model: Model) =
     { model with
         Notes = notes
         Caret = min model.Caret text.Length }
-    |> derive (Some [ id ])
+    |> recomputeFromNotes (Some [ id ])
 
 let private headerFor (date: DateOnly) =
     Printer.printHeader { Date = date; Title = None }
@@ -169,7 +167,6 @@ let private monthLabel (d: DateOnly) =
     let full = [| "January"; "February"; "March"; "April"; "May"; "June"; "July"; "August"; "September"; "October"; "November"; "December" |]
     $"{full.[d.Month - 1]} {d.Year}"
 
-/// Weight for display: "85", "40lb", "+16", "bw"; empty when there is no weight.
 let weightText =
     function
     | Unweighted -> ""
@@ -177,13 +174,9 @@ let weightText =
 
 let repsText (reps: Rep list) = Printer.printReps reps
 
-/// The part after "@": "85x6,6,6", "bw 20,20".
-let setText (r: ExerciseRow) =
-    let row = Printer.printRow r
-    row.Substring(row.IndexOf " @ " + 3)
+let weightAndRepsText (row: ExerciseRow) = Printer.printWeightAndReps row
 
-/// Lines of the note body as the parser sees them, with each one's line number in the text.
-let private bodyLines (text: string) =
+let private bodyLinesWithLineNumbers (text: string) =
     let lines = text.Split('\n')
     let body = lines |> Array.skip (min 1 lines.Length)
 
@@ -194,7 +187,6 @@ let private bodyLines (text: string) =
     |> Array.skip skipped
     |> Array.mapi (fun i l -> i, 1 + skipped + i, l)
 
-/// Exercise name on a line: the text before "@" (or the whole line, while no "@" is typed yet).
 let private exerciseOnLine (line: string) =
     match Parser.parseLine line with
     | Exercise r -> Some r.Exercise
@@ -203,15 +195,12 @@ let private exerciseOnLine (line: string) =
         | "" -> None
         | n -> Some n
 
-/// True when a line names an exercise but has no weight or reps yet.
-let private onlyName (line: string) =
+let private hasNameButNoSets (line: string) =
     let t = line.Trim()
     let i = t.IndexOf '@'
     t <> "" && (i < 0 || t.Substring(i + 1).Trim() = "")
 
-/// Edit distance, for "did you mean".
-let private levenshtein (a: string) (b: string) =
-    // two rolling rows (Fable has no Array2D)
+let private editDistance (a: string) (b: string) =
     let mutable prev = Array.init (b.Length + 1) id
     for i in 1 .. a.Length do
         let cur = Array.zeroCreate (b.Length + 1)
@@ -222,25 +211,20 @@ let private levenshtein (a: string) (b: string) =
         prev <- cur
     prev.[b.Length]
 
-/// Closest known exercise to a name that isn't known yet.
-let private closestKnown (known: string list) (name: string) =
+let private closestKnownExercise (exercisesInOtherRows: string list) (name: string) =
     let k = exerciseKey name
 
-    if k = "" || known |> List.exists (fun n -> exerciseKey n = k) then
+    if k = "" || exercisesInOtherRows |> List.exists (fun n -> exerciseKey n = k) then
         None
     else
-        known
-        |> List.map (fun n -> n, levenshtein (exerciseKey n) k)
+        exercisesInOtherRows
+        |> List.map (fun n -> n, editDistance (exerciseKey n) k)
         |> List.filter (fun (n, d) -> d <= max 2 (k.Length / 3))
         |> List.sortBy snd
         |> List.tryHead
         |> Option.map fst
 
-// ---------------------------------------------------------------- edits
-// Edits are applied to the textarea directly (value + caret together), then reported with TextChanged.
-// Doing it in one synchronous step keeps the caret where it belongs, even when typing fast.
-
-let private repeatEdit (text: string) (caret: int) =
+let private repeatPreviousRow (text: string) (caret: int) =
     let lineNo = Editing.lineIndexAt text caret
     let lines = text.Split('\n')
 
@@ -255,10 +239,10 @@ let private repeatEdit (text: string) (caret: int) =
         if (Editing.currentLine text caret).Trim() = "" then
             Editing.replaceLine text caret row
         else
-            let _, e = Editing.lineBounds text caret
+            let _, e = Editing.lineStartAndEnd text caret
             Editing.insertAt text e ("\n" + row))
 
-let private editInPlace (dispatch: Msg -> unit) (edit: string -> int -> (string * int) option) =
+let private applyEditKeepingCaret (dispatch: Msg -> unit) (edit: string -> int -> (string * int) option) =
     match document.getElementById "editor" with
     | null -> ()
     | el ->
@@ -272,22 +256,20 @@ let private editInPlace (dispatch: Msg -> unit) (edit: string -> int -> (string 
             dispatch (TextChanged(text, caret))
         | None -> ()
 
-// ---------------------------------------------------------------- update
-
-let private editing (model: Model) f =
+let private withOpenNote (model: Model) f =
     match model.Page with
     | Editor id ->
-        match noteById model id with
+        match tryFindNote model id with
         | Some note -> f id note.Text
         | None -> model, Cmd.none
     | _ -> model, Cmd.none
 
-let private dropIfEmpty (model: Model) id =
-    match noteById model id with
+let private removeNoteIfEmpty (model: Model) id =
+    match tryFindNote model id with
     | Some n when n.Text.Split('\n') |> Array.skip 1 |> Array.forall (fun l -> l.Trim() = "") ->
         let notes = model.Notes |> List.filter (fun x -> x.Id <> id)
         saveNotes notes
-        { model with Notes = notes } |> derive (Some [])
+        { model with Notes = notes } |> recomputeFromNotes (Some [])
     | _ -> model
 
 let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
@@ -310,52 +292,52 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
             Notes = notes
             Page = Editor id
             Caret = text.Length }
-        |> derive (Some [ id ]),
-        setCaret text.Length
+        |> recomputeFromNotes (Some [ id ]),
+        focusEditorAt text.Length
 
     | Back ->
         match model.Page with
         | Editor id ->
-            let m = editing model (fun id text -> updateNoteText id (Editing.normalizeAll Printer.tidyLine text) model, Cmd.none) |> fst
-            { dropIfEmpty m id with Page = NotesList }, Cmd.none
+            let m = withOpenNote model (fun id text -> updateNoteText id (Editing.mapLinesBelowHeader Printer.tidyLine text) model, Cmd.none) |> fst
+            { removeNoteIfEmpty m id with Page = NotesList }, Cmd.none
         | ExerciseHistory(_, back) -> { model with Page = back }, Cmd.none
         | LegendPage
         | NotesList -> { model with Page = NotesList }, Cmd.none
 
     | TextChanged(text, caret) ->
-        editing model (fun id _ -> { updateNoteText id text model with Caret = caret }, Cmd.none)
+        withOpenNote model (fun id _ -> { updateNoteText id text model with Caret = caret }, Cmd.none)
 
     | CaretMoved caret -> { model with Caret = caret }, Cmd.none
 
-    | EditorFocused -> { model with Focused = true }, Cmd.none
+    | EditorFocused -> { model with EditorHasFocus = true }, Cmd.none
 
     | EditorBlurred ->
-        let model = { model with Focused = false }
+        let model = { model with EditorHasFocus = false }
 
-        editing model (fun id text ->
-            let normalized = Editing.normalizeAll Printer.tidyLine text
+        withOpenNote model (fun id text ->
+            let normalized = Editing.mapLinesBelowHeader Printer.tidyLine text
             if normalized = text then model, Cmd.none else updateNoteText id normalized model, Cmd.none)
 
     | CopyNote ->
-        editing model (fun _ text ->
+        withOpenNote model (fun _ text ->
             model,
             Cmd.batch
-                [ Cmd.ofEffect (fun _ -> copyToClipboard (Editing.normalizeAll Printer.tidyLine text) |> ignore)
-                  toastCmd "Copied" ])
+                [ Cmd.ofEffect (fun _ -> copyToClipboard (Editing.mapLinesBelowHeader Printer.tidyLine text) |> ignore)
+                  showToast "Copied" ])
 
     | DeleteNote ->
-        editing model (fun id _ ->
+        withOpenNote model (fun id _ ->
             if window.confirm "Delete this note?" then
                 let notes = model.Notes |> List.filter (fun n -> n.Id <> id)
                 saveNotes notes
-                { model with Notes = notes; Page = NotesList } |> derive (Some []), Cmd.none
+                { model with Notes = notes; Page = NotesList } |> recomputeFromNotes (Some []), Cmd.none
             else
                 model, Cmd.none)
 
     | OpenHistory name ->
         let model =
             match model.Page with
-            | Editor id -> { (editing model (fun id text -> updateNoteText id (Editing.normalizeAll Printer.tidyLine text) model, Cmd.none) |> fst) with Page = model.Page }
+            | Editor id -> { (withOpenNote model (fun id text -> updateNoteText id (Editing.mapLinesBelowHeader Printer.tidyLine text) model, Cmd.none) |> fst) with Page = model.Page }
             | _ -> model
 
         { model with Page = ExerciseHistory(name, model.Page) }, Cmd.none
@@ -368,7 +350,7 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         let name = $"workout-notes-{d.Year}-{d.Month:D2}-{d.Day:D2}.md"
         let ordered = model.Notes |> List.sortBy (fun n -> n.Updated)
         download name (exportText ordered)
-        model, toastCmd $"Exported {model.Notes.Length} notes"
+        model, showToast $"Exported {model.Notes.Length} notes"
 
     | ImportNotes text ->
         let existing = model.Notes |> List.map (fun n -> n.Text.Trim()) |> Set.ofList
@@ -383,7 +365,7 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
 
         let notes = added @ model.Notes
         saveNotes notes
-        { model with Notes = notes } |> derive None, toastCmd $"Imported {added.Length} notes"
+        { model with Notes = notes } |> recomputeFromNotes None, showToast $"Imported {added.Length} notes"
 
     | SetMarkLabel(sym, label) ->
         let legend = model.Legend |> List.map (fun m -> if m.Symbol = sym then { m with Label = label } else m)
@@ -393,12 +375,12 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     | SetMarkBehaviour(sym, b) ->
         let legend = model.Legend |> List.map (fun m -> if m.Symbol = sym then { m with Behaviour = b } else m)
         saveLegend legend
-        { model with Legend = legend } |> derive (Some []), Cmd.none
+        { model with Legend = legend } |> recomputeFromNotes (Some []), Cmd.none
 
     | DeleteMark sym ->
         let legend = model.Legend |> List.filter (fun m -> m.Symbol <> sym)
         saveLegend legend
-        { model with Legend = legend } |> derive (Some []), Cmd.none
+        { model with Legend = legend } |> recomputeFromNotes (Some []), Cmd.none
 
     | SetNewMark s -> { model with NewMark = s }, Cmd.none
 
@@ -406,22 +388,23 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
         let s = model.NewMark.Trim()
 
         if s.Length <> 1 then
-            model, toastCmd "A mark is one character"
+            model, showToast "A mark is one character"
         elif not (Parser.isMarkChar s.[0]) then
-            model, toastCmd $"'{s}' can't be a mark"
+            model, showToast $"'{s}' can't be a mark"
         elif model.Legend |> List.exists (fun m -> m.Symbol = s.[0]) then
-            model, toastCmd $"'{s}' is already defined"
+            model, showToast $"'{s}' is already defined"
         else
             let legend = model.Legend @ [ { Symbol = s.[0]; Label = "New mark"; Behaviour = LabelOnly } ]
             saveLegend legend
-            { model with Legend = legend; NewMark = "" } |> derive (Some []), Cmd.none
+            { model with Legend = legend; NewMark = "" } |> recomputeFromNotes (Some []), Cmd.none
+
+    | OpenHelp -> { model with HelpOpen = true }, Cmd.none
+    | CloseHelp -> { model with HelpOpen = false }, Cmd.none
 
     | ShowToast t ->
         { model with Toast = Some t },
         Cmd.ofEffect (fun dispatch -> JS.setTimeout (fun () -> dispatch ClearToast) 1800 |> ignore)
     | ClearToast -> { model with Toast = None }, Cmd.none
-
-// ---------------------------------------------------------------- view helpers
 
 let private icon (svg: string) =
     Html.span [ prop.style [ style.display.inlineFlex ]; prop.ariaHidden true; prop.dangerouslySetInnerHTML svg ]
@@ -435,6 +418,17 @@ let private plus =
 let private gear =
     icon """<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>"""
 
+let private infoIcon =
+    icon """<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.5" r="0.6" fill="currentColor"/></svg>"""
+
+let private infoButton dispatch =
+    Html.button [
+        prop.className "icon-btn"
+        prop.ariaLabel "How to log"
+        prop.onClick (fun _ -> dispatch OpenHelp)
+        prop.children [ infoIcon ]
+    ]
+
 let private repeatIcon =
     icon """<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>"""
 
@@ -444,8 +438,7 @@ let private trash =
 let private backButton (label: string) dispatch =
     Html.button [ prop.className "link"; prop.onClick (fun _ -> dispatch Back); prop.children [ chevron; Html.text label ] ]
 
-/// A button that doesn't steal focus from the editor.
-let private keepFocus = prop.onMouseDown (fun e -> e.preventDefault ())
+let private doesNotStealEditorFocus = prop.onMouseDown (fun e -> e.preventDefault ())
 
 let private badgeView (b: Badge option) =
     match b with
@@ -457,12 +450,10 @@ let private badgeView (b: Badge option) =
 let private chip (name: string) dispatch =
     Html.button [
         prop.className "chip"
-        keepFocus
+        doesNotStealEditorFocus
         prop.onClick (fun _ -> dispatch (OpenHistory name))
         prop.text name
     ]
-
-// ---------------------------------------------------------------- notes list
 
 let private noteDate (model: Model) (n: StoredNote) =
     match Map.tryFind n.Id model.Parsed with
@@ -528,7 +519,7 @@ let private notesListView (model: Model) dispatch =
             Html.div [
                 prop.className "topbar"
                 prop.children [
-                    Html.span []
+                    infoButton dispatch
                     Html.button [ prop.className "icon-btn"; prop.ariaLabel "Legend and settings"; prop.onClick (fun _ -> dispatch OpenLegend); prop.children [ gear ] ]
                 ]
             ]
@@ -562,55 +553,48 @@ let private notesListView (model: Model) dispatch =
         ]
     ]
 
-// ---------------------------------------------------------------- editor
-
 let private editorView (model: Model) (note: StoredNote) dispatch =
     let text = note.Text
     let caretLine = Editing.lineIndexAt text model.Caret
     let line = Editing.currentLine text model.Caret
-    let before = Editing.beforeCaret text model.Caret
+    let before = Editing.textBeforeCaretOnLine text model.Caret
     let parsedNote = Map.tryFind note.Id model.Parsed |> Option.flatten
     let noteDate = parsedNote |> Option.map (fun n -> n.Header.Date) |> Option.defaultValue (today ())
-    let body = bodyLines text
+    let body = bodyLinesWithLineNumbers text
 
-    // Body index (as the parser counts lines) of the caret's line, for badge lookup.
-    let caretBodyIndex =
+    let caretRowIndex =
         body |> Array.tryPick (fun (i, lineNo, _) -> if lineNo = caretLine then Some i else None)
 
-    // Exercises known from every other row (not the one being typed).
-    let known =
+    let exercisesInOtherRows =
         model.Rows
-        |> List.filter (fun r -> not (r.NoteId = note.Id && Some r.Index = caretBodyIndex))
-        |> exerciseNames
+        |> List.filter (fun r -> not (r.NoteId = note.Id && Some r.Index = caretRowIndex))
+        |> exerciseNamesMostRecentFirst
 
-    // Suggestions: on a body line where only a name is being typed (no "@" yet).
-    let suggestions =
+    let nameSuggestions =
         if caretLine = 0 || before.Contains "@" || before.Trim().StartsWith "//" then
             []
         else
             let q = exerciseKey before
 
-            known
+            exercisesInOtherRows
             |> List.filter (fun n -> q = "" || (exerciseKey n).Contains q)
             |> List.filter (fun n -> exerciseKey n <> q)
             |> List.truncate 8
 
     let currentName = if caretLine = 0 then None else exerciseOnLine line
 
-    // A name never used before, with "@" typed: offer the closest known one.
     let didYouMean =
         match currentName with
-        | Some name when line.Contains "@" -> closestKnown known name |> Option.map (fun k -> name, k)
+        | Some name when line.Contains "@" -> closestKnownExercise exercisesInOtherRows name |> Option.map (fun k -> name, k)
         | _ -> None
 
     let isNew =
         match currentName with
-        | Some name when line.Contains "@" && not known.IsEmpty ->
-            not (known |> List.exists (fun k -> exerciseKey k = exerciseKey name))
+        | Some name when line.Contains "@" && not exercisesInOtherRows.IsEmpty ->
+            not (exercisesInOtherRows |> List.exists (fun k -> exerciseKey k = exerciseKey name))
         | _ -> false
 
-    // Last time for the exercise on this line, and the matching set to fill in.
-    let lastHint =
+    let lastSessionHint =
         currentName
         |> Option.bind (fun name ->
             lastSession model.Rows name noteDate note.Id
@@ -629,7 +613,7 @@ let private editorView (model: Model) (note: StoredNote) dispatch =
                 name, date, rows, pick))
 
     let currentBadge =
-        match parsedNote, caretBodyIndex with
+        match parsedNote, caretRowIndex with
         | Some _, Some i -> Map.tryFind (note.Id, i) model.Badges
         | _ -> None
 
@@ -649,6 +633,7 @@ let private editorView (model: Model) (note: StoredNote) dispatch =
                     Html.div [
                         prop.style [ style.display.flex; style.alignItems.center ]
                         prop.children [
+                            infoButton dispatch
                             Html.button [ prop.className "icon-btn"; prop.ariaLabel "Delete note"; prop.onClick (fun _ -> dispatch DeleteNote); prop.children [ trash ] ]
                             Html.button [ prop.className "link strong"; prop.onClick (fun _ -> dispatch CopyNote); prop.text "Copy" ]
                         ]
@@ -682,8 +667,7 @@ let private editorView (model: Model) (note: StoredNote) dispatch =
                         prop.onFocus (fun _ -> dispatch EditorFocused)
                         prop.onBlur (fun _ -> dispatch EditorBlurred)
                     ]
-                    // The parsed rows repeat the text, so they only show while the keyboard is down.
-                    if not model.Focused then
+                    if not model.EditorHasFocus then
                         Html.div [
                             prop.className "parsed"
                             prop.children [
@@ -697,7 +681,7 @@ let private editorView (model: Model) (note: StoredNote) dispatch =
                                             prop.className "prow"
                                             prop.children [
                                                 chip r.Exercise dispatch
-                                                Html.span [ prop.className "w"; prop.text (setText r) ]
+                                                Html.span [ prop.className "w"; prop.text (weightAndRepsText r) ]
                                                 Html.span [ prop.className "b"; prop.children [ badgeView b ] ]
                                             ]
                                         ]
@@ -712,7 +696,7 @@ let private editorView (model: Model) (note: StoredNote) dispatch =
                         ]
                 ]
             ]
-            if model.Focused then
+            if model.EditorHasFocus then
                 Html.div [
                     prop.className "keybar"
                     prop.children [
@@ -724,14 +708,14 @@ let private editorView (model: Model) (note: StoredNote) dispatch =
                                     Html.span [ prop.text $"New exercise “{typed}”. Did you mean" ]
                                     Html.button [
                                         prop.className "use"
-                                        keepFocus
-                                        prop.onClick (fun _ -> editInPlace dispatch (replaceName suggestion))
+                                        doesNotStealEditorFocus
+                                        prop.onClick (fun _ -> applyEditKeepingCaret dispatch (replaceName suggestion))
                                         prop.text suggestion
                                     ]
                                 ]
                             ]
                         | None ->
-                            match lastHint with
+                            match lastSessionHint with
                             | Some(_, date, rows, pick) ->
                                 Html.div [
                                     prop.className "hint"
@@ -740,18 +724,18 @@ let private editorView (model: Model) (note: StoredNote) dispatch =
                                             prop.className "hint-text"
                                             prop.children [
                                                 badgeView currentBadge
-                                                Html.text $"""Last · {formatDate date} · {rows |> List.map setText |> String.concat " · "}"""
+                                                Html.text $"""Last · {formatDate date} · {rows |> List.map weightAndRepsText |> String.concat " · "}"""
                                             ]
                                         ]
-                                        if onlyName line then
+                                        if hasNameButNoSets line then
                                             Html.button [
                                                 prop.className "use"
-                                                keepFocus
+                                                doesNotStealEditorFocus
                                                 prop.onClick (fun _ ->
                                                     let name = exerciseOnLine line |> Option.defaultValue pick.Exercise
                                                     let row = Printer.printRow { pick with Exercise = name; Note = None }
-                                                    editInPlace dispatch (fun t c -> Some(Editing.replaceLine t c row)))
-                                                prop.text (setText pick)
+                                                    applyEditKeepingCaret dispatch (fun t c -> Some(Editing.replaceLine t c row)))
+                                                prop.text (weightAndRepsText pick)
                                             ]
                                     ]
                                 ]
@@ -761,15 +745,15 @@ let private editorView (model: Model) (note: StoredNote) dispatch =
                                 match currentBadge with
                                 | Some _ -> Html.div [ prop.className "hint"; prop.children [ badgeView currentBadge ] ]
                                 | None -> ()
-                        if not suggestions.IsEmpty then
+                        if not nameSuggestions.IsEmpty then
                             Html.div [
                                 prop.className "suggest"
                                 prop.children [
-                                    for s in suggestions do
+                                    for s in nameSuggestions do
                                         Html.button [
                                             prop.key s
-                                            keepFocus
-                                            prop.onClick (fun _ -> editInPlace dispatch (fun t c -> Some(Editing.replaceLine t c $"{s} @ ")))
+                                            doesNotStealEditorFocus
+                                            prop.onClick (fun _ -> applyEditKeepingCaret dispatch (fun t c -> Some(Editing.replaceLine t c $"{s} @ ")))
                                             prop.text s
                                         ]
                                 ]
@@ -786,9 +770,9 @@ let private editorView (model: Model) (note: StoredNote) dispatch =
                                     Html.button [
                                         prop.key k
                                         prop.ariaLabel label
-                                        keepFocus
+                                        doesNotStealEditorFocus
                                         prop.onClick (fun _ ->
-                                            editInPlace dispatch (fun t c ->
+                                            applyEditKeepingCaret dispatch (fun t c ->
                                                 let insert =
                                                     match k with
                                                     | "@" -> if c > 0 && t.[c - 1] = ' ' then "@ " else " @ "
@@ -800,14 +784,14 @@ let private editorView (model: Model) (note: StoredNote) dispatch =
                                 Html.button [
                                     prop.className "repeat"
                                     prop.ariaLabel "Repeat last row"
-                                    keepFocus
+                                    doesNotStealEditorFocus
                                     prop.onClick (fun _ ->
                                         match document.getElementById "editor" with
                                         | null -> ()
                                         | el ->
                                             let ta = el :?> Types.HTMLTextAreaElement
-                                            if (repeatEdit ta.value (int ta.selectionStart)).IsNone then dispatch (ShowToast "No row above to repeat")
-                                            else editInPlace dispatch repeatEdit)
+                                            if (repeatPreviousRow ta.value (int ta.selectionStart)).IsNone then dispatch (ShowToast "No row above to repeat")
+                                            else applyEditKeepingCaret dispatch repeatPreviousRow)
                                     prop.children [ repeatIcon ]
                                 ]
                             ]
@@ -816,8 +800,6 @@ let private editorView (model: Model) (note: StoredNote) dispatch =
                 ]
         ]
     ]
-
-// ---------------------------------------------------------------- history
 
 let private historyView (model: Model) (name: string) dispatch =
     let legend = legendMap model.Legend
@@ -896,7 +878,7 @@ let private historyView (model: Model) (name: string) dispatch =
                                 prop.onClick (fun _ -> dispatch (OpenNote noteId))
                                 prop.children [
                                     Html.div [ prop.className "d"; prop.text (formatDate date) ]
-                                    Html.div [ prop.className "l"; prop.text (rs |> List.map (fun r -> setText r.Row) |> String.concat " · ") ]
+                                    Html.div [ prop.className "l"; prop.text (rs |> List.map (fun r -> weightAndRepsText r.Row) |> String.concat " · ") ]
                                 ]
                             ]
                     Html.div [ prop.style [ style.height 40 ] ]
@@ -904,8 +886,6 @@ let private historyView (model: Model) (name: string) dispatch =
             ]
         ]
     ]
-
-// ---------------------------------------------------------------- legend
 
 let private legendView (model: Model) dispatch =
     let undefinedMarks =
@@ -1022,7 +1002,67 @@ let private legendView (model: Model) dispatch =
         ]
     ]
 
-// ---------------------------------------------------------------- root
+let private helpView (model: Model) dispatch =
+    let example (code: string) (meaning: string) =
+        Html.div [
+            prop.className "help-row"
+            prop.children [ Html.code code; Html.span meaning ]
+        ]
+
+    let section (title: string) (rows: ReactElement list) =
+        Html.div [
+            prop.className "help-section"
+            prop.children [ Html.h3 title; yield! rows ]
+        ]
+
+    Html.div [
+        prop.className "sheet-backdrop"
+        prop.onClick (fun _ -> dispatch CloseHelp)
+        prop.children [
+            Html.div [
+                prop.className "sheet"
+                prop.role "dialog"
+                prop.ariaLabel "How to log"
+                prop.onClick (fun e -> e.stopPropagation ())
+                prop.children [
+                    Html.div [
+                        prop.className "sheet-head"
+                        prop.children [
+                            Html.h2 "How to log"
+                            Html.button [ prop.className "link strong"; prop.onClick (fun _ -> dispatch CloseHelp); prop.text "Done" ]
+                        ]
+                    ]
+                    section "One line per exercise" [
+                        example "incline @ 85x6,6,6" "exercise @ weight x reps"
+                        example "incline@85 6,6,6" "spaces and the x are optional"
+                        example "incline @ 92.5x3 // easy" "a note after //"
+                        example "legs cooked" "a line without @ is just text"
+                    ]
+                    section "Weight" [
+                        example "85" "kg"
+                        example "85kg  40lb  2plates" "unit right after the number"
+                        example "+16" "added (weighted pull-up)"
+                        example "-18" "assisted (machine)"
+                        example "bw" "bodyweight"
+                        example "-" "no weight"
+                    ]
+                    section "Badges" [
+                        Html.div [ prop.className "help-row"; prop.children [ badgeView (Some LoadHigh); Html.span "Heaviest ever for this exercise (same unit)" ] ]
+                        Html.div [ prop.className "help-row"; prop.children [ badgeView (Some RepHigh); Html.span "Most reps ever at this weight" ] ]
+                        Html.div [ prop.className "help-row"; prop.children [ badgeView (Some Tie); Html.span "Ties your best at this weight" ] ]
+                    ]
+                    section "Marks" [
+                        for mark in model.Legend do
+                            example $"8{mark.Symbol}" $"{mark.Label} · {behaviourName mark.Behaviour}"
+                        Html.p [ prop.className "help-note"; prop.text "Edit marks in Legend (the sliders icon on Notes)." ]
+                    ]
+                    section "While typing" [
+                        Html.p [ prop.className "help-note"; prop.text "Pick a name from the suggestions, tap last session's set to fill it, and use the bar for @ x , marks and bw so you stay on the number keyboard. Rows are tidied when you leave the note." ]
+                    ]
+                ]
+            ]
+        ]
+    ]
 
 let view (model: Model) dispatch =
     Html.div [
@@ -1030,11 +1070,12 @@ let view (model: Model) dispatch =
             match model.Page with
             | NotesList -> notesListView model dispatch
             | Editor id ->
-                match noteById model id with
+                match tryFindNote model id with
                 | Some note -> editorView model note dispatch
                 | None -> notesListView model dispatch
             | ExerciseHistory(name, _) -> historyView model name dispatch
             | LegendPage -> legendView model dispatch
+            if model.HelpOpen then helpView model dispatch
             match model.Toast with
             | Some t -> Html.div [ prop.className "toast"; prop.role "status"; prop.text t ]
             | None -> ()

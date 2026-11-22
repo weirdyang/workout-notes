@@ -1,6 +1,4 @@
 @echo off
-rem Restore and build the whole solution.
-rem Double-click to run. Output goes to the window and to scripts\logs\build.log
 setlocal
 cd /d "%~dp0.."
 if not exist scripts\logs mkdir scripts\logs

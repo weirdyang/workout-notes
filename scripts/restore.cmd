@@ -1,6 +1,4 @@
 @echo off
-rem Restore NuGet packages.
-rem Double-click to run. Output goes to the window and to scripts\logs\restore.log
 setlocal
 cd /d "%~dp0.."
 if not exist scripts\logs mkdir scripts\logs

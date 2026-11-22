@@ -2,7 +2,6 @@ module WorkoutNotes.Core.History
 
 open System
 
-/// A parsed row with where it came from. Order = Date, then NoteId, then Index (line order).
 type DatedRow =
     { Date: DateOnly
       NoteId: string
@@ -14,172 +13,174 @@ type Badge =
     | RepHigh
     | Tie
 
-/// Exercise identity for comparison: case- and whitespace-insensitive name.
 let exerciseKey (name: string) =
     name.Trim().ToLower().Split([| ' '; '\t' |], StringSplitOptions.RemoveEmptyEntries)
     |> String.concat " "
 
-let private order (r: DatedRow) = r.Date, r.NoteId, r.Index
+let private chronologicalOrder (row: DatedRow) = row.Date, row.NoteId, row.Index
 
-/// All exercise rows across notes, oldest first.
 let rowsOf (notes: (string * Note) seq) : DatedRow list =
-    notes
-    |> Seq.collect (fun (id, note) ->
+    let rowsOfNote (noteId: string, note: Note) =
         note.Lines
-        |> Seq.mapi (fun i line -> i, line)
-        |> Seq.choose (fun (i, line) ->
+        |> Seq.mapi (fun index line ->
             match line with
             | Exercise row ->
                 Some
                     { Date = note.Header.Date
-                      NoteId = id
-                      Index = i
+                      NoteId = noteId
+                      Index = index
                       Row = row }
-            | _ -> None))
-    |> Seq.sortBy order
-    |> List.ofSeq
+            | _ -> None)
+        |> Seq.choose id
+
+    notes |> Seq.collect rowsOfNote |> Seq.sortBy chronologicalOrder |> List.ofSeq
 
 let private sameExercise (a: DatedRow) (b: DatedRow) =
     exerciseKey a.Row.Exercise = exerciseKey b.Row.Exercise
 
-let private isBefore (a: DatedRow) (b: DatedRow) = compare (order a) (order b) < 0
+let private isBefore (a: DatedRow) (b: DatedRow) =
+    compare (chronologicalOrder a) (chronologicalOrder b) < 0
 
-/// Best rep count in a row among reps the legend allows for highs.
-let private bestReps (legend: Legend) (row: ExerciseRow) =
+let private mostRepsCountingForHighs (legend: Legend) (row: ExerciseRow) =
     row.Reps
     |> List.filter (Scoring.countsForHighs legend)
-    |> List.map (fun r -> r.Count)
+    |> List.map (fun rep -> rep.Count)
     |> function
         | [] -> None
-        | xs -> Some(List.max xs)
+        | counts -> Some(List.max counts)
 
-/// Badge for one row, against every earlier row of the same exercise (earlier notes and earlier lines).
-/// First exposure of an exercise or a weight gets no badge: there is nothing to beat.
+let private loadsInUnit (unit: string) (rows: DatedRow list) =
+    rows
+    |> List.choose (fun row ->
+        match row.Row.Weight with
+        | Load(value, rowUnit) when rowUnit = unit -> Some value
+        | _ -> None)
+
+let private compareWithBestReps (reps: int) (bestBefore: int) =
+    if reps > bestBefore then Some RepHigh
+    elif reps = bestBefore then Some Tie
+    else None
+
 let badge (legend: Legend) (all: DatedRow list) (target: DatedRow) : Badge option =
-    let priors =
-        all |> List.filter (fun r -> sameExercise r target && isBefore r target)
+    let earlierRowsOfExercise =
+        all |> List.filter (fun row -> sameExercise row target && isBefore row target)
 
-    match bestReps legend target.Row with
+    match mostRepsCountingForHighs legend target.Row with
     | None -> None
     | Some reps ->
-        let priorLoads unit =
-            priors
-            |> List.choose (fun r ->
-                match r.Row.Weight with
-                | Load(w, u) when u = unit -> Some w
-                | _ -> None)
-
         match target.Row.Weight with
-        | Load(w, u) when not (priorLoads u).IsEmpty && w > List.max (priorLoads u) -> Some LoadHigh
+        | Load(value, unit) when
+            (let earlierLoads = loadsInUnit unit earlierRowsOfExercise
+             not earlierLoads.IsEmpty && value > List.max earlierLoads)
+            ->
+            Some LoadHigh
         | weight ->
-            let atWeight =
-                priors
-                |> List.filter (fun r -> r.Row.Weight = weight)
-                |> List.choose (fun r -> bestReps legend r.Row)
+            let bestRepsAtThisWeight =
+                earlierRowsOfExercise
+                |> List.filter (fun row -> row.Row.Weight = weight)
+                |> List.choose (fun row -> mostRepsCountingForHighs legend row.Row)
 
-            match atWeight with
+            match bestRepsAtThisWeight with
             | [] -> None
-            | xs ->
-                let best = List.max xs
+            | counts -> compareWithBestReps reps (List.max counts)
 
-                if reps > best then Some RepHigh
-                elif reps = best then Some Tie
-                else None
+let allBadges (legend: Legend) (rowsOldestFirst: DatedRow list) : Map<string * int, Badge> =
+    let mutable heaviestLoadSoFar: Map<string * string, decimal> = Map.empty
+    let mutable mostRepsSoFar: Map<string * Weight, int> = Map.empty
+    let mutable badges = Map.empty
 
-/// Badges for every row in one pass (same rules as `badge`), keyed by (NoteId, Index).
-/// `rows` must be oldest first, as `rowsOf` returns them.
-let allBadges (legend: Legend) (rows: DatedRow list) : Map<string * int, Badge> =
-    let mutable maxLoad: Map<string * string, decimal> = Map.empty
-    let mutable bestAt: Map<string * Weight, int> = Map.empty
-    let mutable result = Map.empty
+    for row in rowsOldestFirst do
+        let exercise = exerciseKey row.Row.Exercise
 
-    for r in rows do
-        let key = exerciseKey r.Row.Exercise
-
-        match bestReps legend r.Row with
+        match mostRepsCountingForHighs legend row.Row with
         | None -> ()
         | Some reps ->
-            let b =
-                let loadKey =
-                    match r.Row.Weight with
-                    | Load(_, u) -> Some(key, u)
-                    | _ -> None
+            let badge =
+                match row.Row.Weight with
+                | Load(value, unit) when
+                    (match Map.tryFind (exercise, unit) heaviestLoadSoFar with
+                     | Some heaviest -> value > heaviest
+                     | None -> false)
+                    ->
+                    Some LoadHigh
+                | weight ->
+                    Map.tryFind (exercise, weight) mostRepsSoFar
+                    |> Option.bind (compareWithBestReps reps)
 
-                match r.Row.Weight, loadKey |> Option.bind (fun k -> Map.tryFind k maxLoad) with
-                | Load(w, _), Some m when w > m -> Some LoadHigh
-                | weight, _ ->
-                    match Map.tryFind (key, weight) bestAt with
-                    | Some best when reps > best -> Some RepHigh
-                    | Some best when reps = best -> Some Tie
-                    | _ -> None
+            badge |> Option.iter (fun b -> badges <- Map.add (row.NoteId, row.Index) b badges)
 
-            b |> Option.iter (fun b -> result <- Map.add (r.NoteId, r.Index) b result)
+            let previousBest =
+                Map.tryFind (exercise, row.Row.Weight) mostRepsSoFar |> Option.defaultValue -1
 
-            let prev = Map.tryFind (key, r.Row.Weight) bestAt |> Option.defaultValue -1
-            bestAt <- Map.add (key, r.Row.Weight) (max prev reps) bestAt
+            mostRepsSoFar <- Map.add (exercise, row.Row.Weight) (max previousBest reps) mostRepsSoFar
 
-        // a row with no countable reps still counts as a load done (matches `badge`, which uses all prior loads)
-        match r.Row.Weight with
-        | Load(w, u) ->
-            let prev = Map.tryFind (key, u) maxLoad
-            if prev.IsNone || w > prev.Value then maxLoad <- Map.add (key, u) w maxLoad
+        match row.Row.Weight with
+        | Load(value, unit) ->
+            let isHeavier =
+                match Map.tryFind (exercise, unit) heaviestLoadSoFar with
+                | Some heaviest -> value > heaviest
+                | None -> true
+
+            if isHeavier then
+                heaviestLoadSoFar <- Map.add (exercise, unit) value heaviestLoadSoFar
         | _ -> ()
 
-    result
+    badges
 
-/// The most recent earlier session (another note) that has this exercise: its date and rows.
-let lastSession (all: DatedRow list) (exercise: string) (beforeDate: DateOnly) (excludeNote: string) =
+let lastSession (all: DatedRow list) (exercise: string) (onOrBefore: DateOnly) (excludingNoteId: string) =
     let key = exerciseKey exercise
 
     all
-    |> List.filter (fun r ->
-        exerciseKey r.Row.Exercise = key
-        && r.NoteId <> excludeNote
-        && r.Date <= beforeDate)
-    |> List.groupBy (fun r -> r.Date, r.NoteId)
+    |> List.filter (fun row ->
+        exerciseKey row.Row.Exercise = key
+        && row.NoteId <> excludingNoteId
+        && row.Date <= onOrBefore)
+    |> List.groupBy (fun row -> row.Date, row.NoteId)
     |> List.sortByDescending fst
     |> List.tryHead
-    |> Option.map (fun ((date, _), rows) -> date, rows |> List.map (fun r -> r.Row))
+    |> Option.map (fun ((date, _), rows) -> date, rows |> List.map (fun row -> row.Row))
 
-/// Best reps ever at each weight, heaviest first, with the date it was done.
+let private heaviestFirst (weight: Weight) =
+    match weight with
+    | Load(value, unit) -> 3, unit, value
+    | Added(value, unit) -> 2, unit, value
+    | Bodyweight -> 1, "", 0m
+    | Assisted(value, unit) -> 0, unit, -value
+    | Unweighted -> -1, "", 0m
+
 let bestsByWeight (legend: Legend) (all: DatedRow list) (exercise: string) =
     let key = exerciseKey exercise
 
-    all
-    |> List.filter (fun r -> exerciseKey r.Row.Exercise = key)
-    |> List.groupBy (fun r -> r.Row.Weight)
-    |> List.choose (fun (weight, rows) ->
-        rows
-        |> List.choose (fun r -> bestReps legend r.Row |> Option.map (fun b -> b, r))
-        |> function
-            | [] -> None
-            | xs ->
-                // highest reps; earliest date that reached it
-                let best = xs |> List.map fst |> List.max
-                let first = xs |> List.find (fun (b, _) -> b = best) |> snd
-                Some(weight, best, first.Date))
-    |> List.sortByDescending (fun (w, _, _) ->
-        match w with
-        | Load(d, u) -> 3, u, d
-        | Added(d, u) -> 2, u, d
-        | Bodyweight -> 1, "", 0m
-        | Assisted(d, u) -> 0, u, -d
-        | Unweighted -> -1, "", 0m)
+    let bestAndFirstDateReached (weight: Weight, rows: DatedRow list) =
+        let repsPerRow =
+            rows
+            |> List.choose (fun row -> mostRepsCountingForHighs legend row.Row |> Option.map (fun reps -> reps, row))
 
-/// Best e1RM across all rows of an exercise, with the row it came from.
+        match repsPerRow with
+        | [] -> None
+        | _ ->
+            let best = repsPerRow |> List.map fst |> List.max
+            let firstToReachBest = repsPerRow |> List.find (fun (reps, _) -> reps = best) |> snd
+            Some(weight, best, firstToReachBest.Date)
+
+    all
+    |> List.filter (fun row -> exerciseKey row.Row.Exercise = key)
+    |> List.groupBy (fun row -> row.Row.Weight)
+    |> List.choose bestAndFirstDateReached
+    |> List.sortByDescending (fun (weight, _, _) -> heaviestFirst weight)
+
 let bestE1rm (legend: Legend) (all: DatedRow list) (exercise: string) =
     let key = exerciseKey exercise
 
     all
-    |> List.filter (fun r -> exerciseKey r.Row.Exercise = key)
-    |> List.choose (fun r -> Scoring.bestE1rm legend r.Row |> Option.map (fun e -> e, r))
+    |> List.filter (fun row -> exerciseKey row.Row.Exercise = key)
+    |> List.choose (fun row -> Scoring.bestE1rm legend row.Row |> Option.map (fun e1rm -> e1rm, row))
     |> function
         | [] -> None
-        | xs -> Some(List.maxBy fst xs)
+        | candidates -> Some(List.maxBy fst candidates)
 
-/// Distinct exercise names, most recently used first (display name = latest spelling).
-let exerciseNames (all: DatedRow list) =
+let exerciseNamesMostRecentFirst (all: DatedRow list) =
     all
     |> List.rev
-    |> List.distinctBy (fun r -> exerciseKey r.Row.Exercise)
-    |> List.map (fun r -> r.Row.Exercise)
+    |> List.distinctBy (fun row -> exerciseKey row.Row.Exercise)
+    |> List.map (fun row -> row.Row.Exercise)

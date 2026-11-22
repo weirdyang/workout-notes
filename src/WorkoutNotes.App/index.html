@@ -17,18 +17,17 @@
   <div id="root"></div>
   <script type="module" src="./fable_output/Main.js"></script>
   <script>
-    // iOS doesn't shrink the page when the keyboard opens: size the app to the visible area instead,
-    // so the key bar sits right above the keyboard.
+    const fitAppAboveOnScreenKeyboard = () => {
+      document.documentElement.style.setProperty("--vvh", window.visualViewport.height + "px");
+      window.scrollTo(0, 0);
+    };
     if (window.visualViewport) {
-      const vv = window.visualViewport;
-      const fit = () => {
-        document.documentElement.style.setProperty("--vvh", vv.height + "px");
-        window.scrollTo(0, 0);
-      };
-      vv.addEventListener("resize", fit);
-      fit();
+      window.visualViewport.addEventListener("resize", fitAppAboveOnScreenKeyboard);
+      fitAppAboveOnScreenKeyboard();
     }
-    if ("serviceWorker" in navigator && location.hostname !== "localhost") {
+
+    const isLocalDevelopment = location.hostname === "localhost";
+    if ("serviceWorker" in navigator && !isLocalDevelopment) {
       window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js"));
     }
   </script>

@@ -1,31 +1,33 @@
-// Offline cache: serve from cache first, refresh it from the network in the background.
-const CACHE = "workout-notes-v1";
+const OFFLINE_CACHE = "workout-notes-v1";
+const APP_SHELL = ["./", "./index.html"];
 
-self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["./", "./index.html"])));
+const cacheAppShell = () => caches.open(OFFLINE_CACHE).then((cache) => cache.addAll(APP_SHELL));
+
+const deleteOldCaches = () =>
+  caches.keys().then((names) => Promise.all(names.filter((name) => name !== OFFLINE_CACHE).map((name) => caches.delete(name))));
+
+const cachedThenRefreshedFromNetwork = async (request) => {
+  const cache = await caches.open(OFFLINE_CACHE);
+  const cached = await cache.match(request);
+  const refreshed = fetch(request)
+    .then((response) => {
+      if (response.ok) cache.put(request, response.clone());
+      return response;
+    })
+    .catch(() => cached);
+  return cached || refreshed;
+};
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(cacheAppShell());
   self.skipWaiting();
 });
 
-self.addEventListener("activate", (e) => {
-  e.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim())
-  );
+self.addEventListener("activate", (event) => {
+  event.waitUntil(deleteOldCaches().then(() => self.clients.claim()));
 });
 
-self.addEventListener("fetch", (e) => {
-  if (e.request.method !== "GET") return;
-  e.respondWith(
-    caches.open(CACHE).then(async (cache) => {
-      const cached = await cache.match(e.request);
-      const network = fetch(e.request)
-        .then((res) => {
-          if (res.ok) cache.put(e.request, res.clone());
-          return res;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
-  );
+self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") return;
+  event.respondWith(cachedThenRefreshedFromNetwork(event.request));
 });

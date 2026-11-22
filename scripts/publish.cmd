@@ -1,6 +1,4 @@
 @echo off
-rem Build the web app into dist\ (static files to host anywhere). Needs Node.js.
-rem Double-click to run. Output goes to the window and to scripts\logs\publish.log
 setlocal
 cd /d "%~dp0.."
 if not exist scripts\logs mkdir scripts\logs

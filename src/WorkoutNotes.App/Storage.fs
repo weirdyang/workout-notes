@@ -1,4 +1,3 @@
-/// Notes and legend live in the browser's localStorage. Plain text in, plain text out.
 module Storage
 
 open Fable.Core
@@ -96,7 +95,6 @@ let behaviourName =
     | NoHighs -> "Doesn't count for highs"
     | ExcludeFromCount -> "Excluded from rep count"
 
-/// Export: every note, oldest first, separated by a `---` line.
 let exportText (notes: StoredNote list) =
     notes |> List.map (fun n -> n.Text.Trim()) |> String.concat "\n\n---\n\n"
 

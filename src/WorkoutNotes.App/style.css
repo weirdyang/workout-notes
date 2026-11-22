@@ -24,7 +24,6 @@ button { font: inherit; color: inherit; }
   padding-top: env(safe-area-inset-top); }
 .scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
-/* top bar */
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 8px 0 4px; min-height: 52px; }
 .link { background: none; border: 0; color: var(--accent); font-size: 17px; min-height: 44px; padding: 0 10px; display: inline-flex; align-items: center; gap: 2px; cursor: pointer; }
 .link.strong { font-weight: 600; }
@@ -32,7 +31,6 @@ button { font: inherit; color: inherit; }
 .title { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; padding: 4px 20px 12px; margin: 0; }
 .subtitle { font-size: 14px; color: var(--muted); padding: 0 20px 12px; margin-top: -8px; }
 
-/* notes list */
 .search { display: flex; align-items: center; gap: 8px; margin: 0 16px 8px; padding: 0 12px; min-height: 40px; border-radius: 10px; background: var(--chip); color: var(--muted); }
 .search input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--text); font: 16px var(--sans); }
 .section-label { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; padding: 14px 20px 8px; }
@@ -45,11 +43,9 @@ button { font: inherit; color: inherit; }
 .empty { color: var(--muted); padding: 40px 24px; text-align: center; line-height: 1.6; }
 .fab { position: fixed; right: max(20px, calc(50vw - 340px)); bottom: calc(24px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border-radius: 28px; border: 0; background: var(--accent); color: var(--bg); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
 
-/* badges */
 .badge { font: 700 11px var(--sans); padding: 3px 6px; border-radius: 6px; background: var(--accent); color: var(--bg); white-space: nowrap; }
 .badge.tie { background: var(--key); color: #c9ccd1; }
 
-/* editor */
 .editor-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 textarea.editor { flex: 1; min-height: 160px; width: 100%; resize: none; border: 0; outline: none; background: var(--bg); color: var(--text);
   font: 16px/1.7 var(--mono); padding: 4px 20px 12px; tab-size: 4; }
@@ -63,7 +59,6 @@ textarea.editor { flex: 1; min-height: 160px; width: 100%; resize: none; border:
 .perr { font: 12px var(--sans); color: var(--danger); padding: 6px 8px; border-bottom: 1px solid var(--line); }
 .perr code { font-family: var(--mono); color: var(--text); }
 
-/* keyboard bar */
 .keybar { background: var(--surface); border-top: 1px solid #26292e; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
 .hint { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); padding: 2px 4px 6px; min-height: 28px; }
 .hint .use { background: var(--key); border: 0; border-radius: 8px; color: var(--text); font: 13px var(--mono); padding: 6px 10px; min-height: 32px; cursor: pointer; white-space: nowrap; }
@@ -73,7 +68,6 @@ textarea.editor { flex: 1; min-height: 160px; width: 100%; resize: none; border:
 .keys button { flex: 1; min-width: 0; min-height: 44px; border: 0; border-radius: 8px; background: var(--key); color: var(--text); font: 17px var(--mono); cursor: pointer; }
 .keys button.repeat { flex: none; width: 52px; background: var(--accent); color: var(--bg); display: flex; align-items: center; justify-content: center; }
 
-/* history */
 .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 0 16px 16px; }
 .card { background: var(--surface); border-radius: 12px; padding: 12px 14px; }
 .card .k { font-size: 12px; color: var(--muted); }
@@ -88,7 +82,6 @@ textarea.editor { flex: 1; min-height: 160px; width: 100%; resize: none; border:
 .sess .d { font-size: 14px; font-weight: 600; padding-bottom: 4px; }
 .sess .l { font: 14px/1.6 var(--mono); color: #c9ccd1; }
 
-/* legend */
 .mark { display: grid; grid-template-columns: 40px minmax(0, 1fr) 36px; align-items: center; gap: 10px; min-height: 64px; border-bottom: 1px solid #23262b; }
 .mark .sym { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 8px; background: var(--key); font: 700 18px var(--mono); }
 .mark input, .mark select, .addmark input { background: none; border: 0; color: var(--text); font: 500 16px var(--sans); outline: none; width: 100%; padding: 2px 0; }
@@ -104,3 +97,14 @@ textarea.editor { flex: 1; min-height: 160px; width: 100%; resize: none; border:
 .hint-text { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .hint .badge { flex: none; }
 .keys button { font-size: 16px; }
+.sheet-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: flex-end; justify-content: center; z-index: 10; }
+.sheet { width: 100%; max-width: 720px; max-height: 85dvh; overflow-y: auto; background: var(--surface); border-radius: 16px 16px 0 0; padding: 8px 20px calc(24px + env(safe-area-inset-bottom)); }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; background: var(--surface); padding-top: 8px; }
+.sheet h2 { font-size: 22px; margin: 0; }
+.help-section { padding-top: 14px; }
+.help-section h3 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 6px; }
+.help-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 12px; align-items: center; min-height: 34px; padding: 6px 0; border-bottom: 1px solid #23262b; font-size: 14px; }
+.help-row code { font: 14px var(--mono); color: var(--text); }
+.help-row span { color: #c9ccd1; }
+.help-row .badge { justify-self: start; }
+.help-note { font-size: 14px; color: #c9ccd1; line-height: 1.5; margin: 6px 0 0; }

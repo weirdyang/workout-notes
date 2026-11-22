@@ -1,4 +1,3 @@
-// Cloudflare Workers static assets: serves the built app in dist/. No Worker script needed.
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "workout-notes",
@@ -7,6 +6,5 @@
     "directory": "./dist",
     "not_found_handling": "single-page-application"
   },
-  // Cloudflare creates the DNS record and certificate for this on deploy.
   "routes": [{ "pattern": "log.wdym.fyi", "custom_domain": true }]
 }
