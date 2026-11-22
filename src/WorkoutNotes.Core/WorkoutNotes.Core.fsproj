@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Domain.fs" />
+    <Compile Include="Parser.fs" />
+    <Compile Include="Printer.fs" />
+    <Compile Include="Scoring.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="XParsec" Version="1.0.0" />
+  </ItemGroup>
+
+</Project>
